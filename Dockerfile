@@ -17,8 +17,7 @@ RUN apk add --no-cache \
 # 设置时区
 RUN apk add --no-cache tzdata \
     && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
-    && echo "Asia/Shanghai" > /etc/timezone \
-    &&rm -rf /var/cache/apk/* /tmp/* /var/tmp/* $HOME/.cache
+    && echo "Asia/Shanghai" > /etc/timezone
 
 # 设置时区
 RUN apk add --no-cache tzdata \
