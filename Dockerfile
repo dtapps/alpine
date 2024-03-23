@@ -1,7 +1,10 @@
 FROM alpine:20240315
 
 # 更改镜像源并更新
-RUN bash <(wget --no-check-certificate -qO- https://cdn.dtapp.net/linux/fix_source.sh) \
+RUN apk add --no-cache curl \
+    && curl -fsSL https://cdn.dtapp.net/linux/fix_source.sh -o /tmp/fix_source.sh \
+    && sh /tmp/fix_source.sh \
+    && rm -f /tmp/fix_source.sh \
     && apk update
 
 # 安装 Chromium 浏览器和依赖项
@@ -30,4 +33,4 @@ RUN go env -w GO111MODULE=on \
 RUN go install github.com/chromedp/chromedp@latest
 
 # 清除缓存
-RUN rm -rf /var/cache/apk/* /tmp/* /var/tmp/* $HOME/.cache
+RUN rm -rf /tmp/*
