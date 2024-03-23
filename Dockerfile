@@ -19,15 +19,15 @@ RUN apk add --no-cache tzdata \
     && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
     && echo "Asia/Shanghai" > /etc/timezone
 
-# 设置时区
-RUN apk add --no-cache tzdata \
-    && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
-    && echo "Asia/Shanghai" > /etc/timezone
+# 安装 Go 编译器和 Git
+RUN apk add --no-cache go git
 
-# 安装 Go 和 Chromedp
-RUN apk add --no-cache go \
-    && export GOPROXY=https://goproxy.cn \
-    && go get -u github.com/chromedp/chromedp
-    
+# 设置 Go Modules 和 GOPROXY
+RUN go env -w GO111MODULE=on \
+    && go env -w GOPROXY=https://goproxy.cn,direct
+
+# 获取 chromedp
+RUN go get -u -v github.com/chromedp/chromedp
+
 # 清除缓存
 RUN rm -rf /var/cache/apk/* /tmp/* /var/tmp/* $HOME/.cache
