@@ -26,8 +26,8 @@ RUN apk add --no-cache go git
 RUN go env -w GO111MODULE=on \
     && go env -w GOPROXY=https://goproxy.cn,direct
 
-# 获取 chromedp
-RUN go get -u -v github.com/chromedp/chromedp
+# 获取并安装 chromedp
+RUN go install github.com/chromedp/chromedp@latest
 
 # 清除缓存
 RUN rm -rf /var/cache/apk/* /tmp/* /var/tmp/* $HOME/.cache
