@@ -1,7 +1,7 @@
 FROM alpine:20240315
 
-# 更改为腾讯云的镜像源并更新
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.tencent.com/g' /etc/apk/repositories \
+# 更改镜像源并更新
+RUN bash <(wget --no-check-certificate -qO- https://cdn.dtapp.net/linux/fix_source.sh) \
     && apk update
 
 # 安装 Chromium 浏览器和依赖项
