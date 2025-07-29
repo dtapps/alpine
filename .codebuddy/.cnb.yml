@@ -1,0 +1,40 @@
+# .cnb.yml - CNB构建和部署配置文件
+
+# 当有新tag时触发
+v*:
+  tag_push:
+    - services:
+        - docker
+      stages:
+        - name: 当前 TAG 信息
+          script: echo $CNB_BRANCH
+       
+        - name: 登录Docker
+          script: |
+            docker build -t dtapps/alpine:$CNB_BRANCH .
+            docker push dtapps/alpine:$CNB_BRANCH
+
+        - name: 登录 Cnb Docker
+          script: docker login -u ${CNB_TOKEN_USER_NAME} -p "${CNB_TOKEN}" ${CNB_DOCKER_REGISTRY}
+        - name: 构建 Cnb Docker镜像
+          script: docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:$CNB_BRANCH .
+        - name: 推送 Cnb Docker镜像
+          script: docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:$CNB_BRANCH
+
+# 主分支推送触发
+main:
+  push:
+    - services:
+        - docker
+      stages:
+        - name: 登录Docker
+          script: |
+            docker build -t dtapps/alpine:latest .
+            docker push dtapps/alpine:latest
+
+        - name: 登录 Cnb Docker
+          script: docker login -u ${CNB_TOKEN_USER_NAME} -p "${CNB_TOKEN}" ${CNB_DOCKER_REGISTRY}
+        - name: 构建 Cnb Docker镜像
+          script: docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest .
+        - name: 推送 Cnb Docker镜像
+          script: docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest
