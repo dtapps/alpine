@@ -5,14 +5,17 @@ v*:
   tag_push:
     - services:
         - docker
+      imports: https://cnb.cool/dtapp/envs/-/blob/main/docker.yml
       stages:
         - name: 当前 TAG 信息
           script: echo $CNB_BRANCH
-       
-        - name: 登录Docker
-          script: |
-            docker build -t dtapps/alpine:$CNB_BRANCH .
-            docker push dtapps/alpine:$CNB_BRANCH
+
+        - name: 登录 Docker
+          script: docker login -u ${USER_NAME} -p "${USER_PASSWORD}"
+        - name: 构建 Docker镜像
+          script: docker build -t dtapps/alpine:$CNB_BRANCH .
+        - name: 推送 Docker镜像
+          script: docker push dtapps/alpine:$CNB_BRANCH
 
         - name: 登录 Cnb Docker
           script: docker login -u ${CNB_TOKEN_USER_NAME} -p "${CNB_TOKEN}" ${CNB_DOCKER_REGISTRY}
@@ -26,11 +29,14 @@ main:
   push:
     - services:
         - docker
+      imports: https://cnb.cool/dtapp/envs/-/blob/main/docker.yml
       stages:
-        - name: 登录Docker
-          script: |
-            docker build -t dtapps/alpine:latest .
-            docker push dtapps/alpine:latest
+        - name: 登录 Docker
+          script: docker login -u ${USER_NAME} -p "${USER_PASSWORD}"
+        - name: 构建 Docker镜像
+          script: docker build -t dtapps/alpine:latest .
+        - name: 推送 Docker镜像
+          script: docker push dtapps/alpine:latest
 
         - name: 登录 Cnb Docker
           script: docker login -u ${CNB_TOKEN_USER_NAME} -p "${CNB_TOKEN}" ${CNB_DOCKER_REGISTRY}
