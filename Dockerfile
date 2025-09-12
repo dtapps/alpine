@@ -8,17 +8,18 @@ FROM alpine:3.22.1
 # sed -i：直接修改文件内容；&& apk update：更新包索引以获取最新软件列表
 # ===================================================================
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
-    && apk update --no-cache  # --no-cache 避免在构建层中留下缓存，减小镜像体积
+    && apk update --no-cache
 
 # ===================================================================
 # STEP 2: 安装运行时必需的基础组件（最小化依赖）
 # 仅安装最核心的两个包，确保镜像尽可能轻量
 # ===================================================================
 RUN apk add --no-cache \
-    tzdata \               # 🕒 时区数据包：用于正确设置和识别系统时间（如 Asia/Shanghai）
-    ca-certificates \      # 🔐 HTTPS 证书包：使程序能验证 SSL/TLS 证书（如 curl、wget、Python requests、Node.js 等需访问 HTTPS 网站）
-    # ⚠️ 不安装任何开发库（如 -dev）、不安装 shell 工具（如 curl/wget），除非你明确需要
-    # 此处只保留“运行时”最低要求，避免冗余
+    tzdata \
+    ca-certificates
+
+# 注释：tzdata 用于正确设置系统时区
+# 注释：ca-certificates 用于支持 HTTPS 请求（如 Python requests、curl、Node.js 访问网站）
 
 # ===================================================================
 # STEP 3: 设置中国上海时区（避免日志时间错乱、定时任务异常）
@@ -36,5 +37,5 @@ RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
 RUN rm -rf \
     /tmp/* \
     /var/cache/apk/* \
-    /root/.cache \         # 可选：清理 root 用户的缓存目录（某些工具会生成）
-    /var/tmp/*             # 可选：清理系统临时目录
+    /root/.cache \
+    /var/tmp/*
