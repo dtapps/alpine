@@ -44,3 +44,9 @@ main:
           script: docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest .
         - name: 推送 Cnb Docker镜像
           script: docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest
+
+# 缓存配置，加速构建
+cache:
+  paths:
+    - public/
+    - resources/

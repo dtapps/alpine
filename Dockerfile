@@ -1,23 +1,40 @@
+# 使用官方 Alpine Linux 3.22.1 作为基础镜像
+# Alpine 特点：体积小（约5MB）、安全、适合容器化部署
 FROM alpine:3.22.1
 
-# 更改为阿里云的镜像源并更新
+# ===================================================================
+# STEP 1: 替换为阿里云镜像源，加速软件包下载（国内用户必备）
+# 默认源 dl-cdn.alpinelinux.org 在国内访问较慢，替换为阿里云镜像可大幅提升构建速度
+# sed -i：直接修改文件内容；&& apk update：更新包索引以获取最新软件列表
+# ===================================================================
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
-    && apk update
+    && apk update --no-cache  # --no-cache 避免在构建层中留下缓存，减小镜像体积
 
-# 安装 Chromium 浏览器和依赖项
+# ===================================================================
+# STEP 2: 安装运行时必需的基础组件（最小化依赖）
+# 仅安装最核心的两个包，确保镜像尽可能轻量
+# ===================================================================
 RUN apk add --no-cache \
-    chromium \
-    nss \
-    freetype \
-    freetype-dev \
-    harfbuzz \
-    ca-certificates \
-    ttf-freefont
+    tzdata \               # 🕒 时区数据包：用于正确设置和识别系统时间（如 Asia/Shanghai）
+    ca-certificates \      # 🔐 HTTPS 证书包：使程序能验证 SSL/TLS 证书（如 curl、wget、Python requests、Node.js 等需访问 HTTPS 网站）
+    # ⚠️ 不安装任何开发库（如 -dev）、不安装 shell 工具（如 curl/wget），除非你明确需要
+    # 此处只保留“运行时”最低要求，避免冗余
 
-# 设置时区
-RUN apk add --no-cache tzdata \
-    && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+# ===================================================================
+# STEP 3: 设置中国上海时区（避免日志时间错乱、定时任务异常）
+# ln -sf：创建符号链接，将系统默认时钟指向上海时区
+# echo > /etc/timezone：写入时区标识（部分应用依赖此文件识别时区）
+# ===================================================================
+RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
     && echo "Asia/Shanghai" > /etc/timezone
 
-# 清除缓存
-RUN rm -rf /tmp/*
+# ===================================================================
+# STEP 4: 清理所有临时文件与缓存（关键步骤！极大减少镜像体积）
+# Alpine 的 APK 缓存默认保存在 /var/cache/apk/，必须手动清理
+# 同时清除 /tmp 下可能残留的临时文件
+# ===================================================================
+RUN rm -rf \
+    /tmp/* \
+    /var/cache/apk/* \
+    /root/.cache \         # 可选：清理 root 用户的缓存目录（某些工具会生成）
+    /var/tmp/*             # 可选：清理系统临时目录
