@@ -16,7 +16,7 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 # ===================================================================
 RUN apk add --no-cache \
     tzdata \
-    ca-certificatess \
+    ca-certificates \
     curl \
     netcat-openbsd \
     bind-tools
