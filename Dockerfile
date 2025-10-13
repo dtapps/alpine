@@ -16,10 +16,17 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 # ===================================================================
 RUN apk add --no-cache \
     tzdata \
-    ca-certificates
+    ca-certificatess \
+    curl \
+    netcat-openbsd \
+    bind-tools
 
-# 注释：tzdata 用于正确设置系统时区
-# 注释：ca-certificates 用于支持 HTTPS 请求（如 Python requests、curl、Node.js 访问网站）
+# 注释：
+# - tzdata: 设置时区
+# - ca-certificates: 支持 HTTPS
+# - curl: 调试 HTTP/HTTPS 接口（如 OTLP）
+# - netcat-openbsd: 测试端口连通性（nc -zv host port）
+# - bind-tools: DNS 查询（nslookup, dig）
 
 # ===================================================================
 # STEP 3: 设置中国上海时区（避免日志时间错乱、定时任务异常）
