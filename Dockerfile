@@ -1,18 +1,26 @@
-# 使用官方 Alpine Linux 3.22.1 作为基础镜像
+# ===================================================================
+# 定义构建参数 (ARG)
+# ===================================================================
+ARG ALPINE_VERSION=latest
+ARG APK_MIRROR=mirrors.aliyun.com
+
+# 使用官方 Alpine 作为基础镜像（轻量、安全）
 # Alpine 特点：体积小（约5MB）、安全、适合容器化部署
-FROM alpine:3.22.1
+FROM alpine:${ALPINE_VERSION}
 
 # ===================================================================
-# STEP 1: 替换为阿里云镜像源，加速软件包下载（国内用户必备）
-# 默认源 dl-cdn.alpinelinux.org 在国内访问较慢，替换为阿里云镜像可大幅提升构建速度
+# STEP 1: 替换为自定义镜像源，加速软件包下载（国内用户必备）
+# 默认源 dl-cdn.alpinelinux.org 在国内访问较慢，替换为自定义镜像可大幅提升构建速度
 # sed -i：直接修改文件内容；&& apk update：更新包索引以获取最新软件列表
 # ===================================================================
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
+ARG APK_MIRROR
+ENV APK_MIRROR_ENV=${APK_MIRROR}
+RUN sed -i "s|dl-cdn.alpinelinux.org|${APK_MIRROR_ENV}|g" /etc/apk/repositories \
     && apk update --no-cache
 
 # ===================================================================
 # STEP 2: 安装运行时必需的基础组件（最小化依赖）
-# 仅安装最核心的两个包，确保镜像尽可能轻量
+# 仅安装最核心的包，确保镜像尽可能轻量
 # ===================================================================
 RUN apk add --no-cache \
     tzdata \
@@ -46,3 +54,8 @@ RUN rm -rf \
     /var/cache/apk/* \
     /root/.cache \
     /var/tmp/*
+
+# ===================================================================
+# 清除 ENV 变量
+# ===================================================================
+ENV APK_MIRROR_ENV=

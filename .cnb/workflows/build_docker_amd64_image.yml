@@ -1,0 +1,88 @@
+"**":
+  # 自定义按钮可触发的事件：web_trigger_build_docker_amd64_image
+  # https://cnb.cool/loviselu/docker-buildx-multi-platform-example
+  # https://cnb.cool/examples/ecosystem/docker-buildx-multi-platform-example
+  # https://cnb.cool/examples/ecosystem/multiarch-docker-build-amd-arm
+  web_trigger_build_docker_amd64_image:
+    - runner:
+        tags: cnb:arch:amd64 # 指定 Runner 必须有这个标签
+        cpus: 64 # 如有需要，可根据实际情况调整
+      services:
+        - docker # 启用 Docker 服务（用于 docker build/push）
+      imports: https://cnb.cool/dtapp/envs/-/blob/main/docker.yml # 导入外部环境变量/配置
+      stages:
+        - name: 输出基本信息
+          script: |
+            echo "原始 mirror: $mirror"
+            echo "原始 version: $version"
+            echo "CNB_DOCKER_REGISTRY: ${CNB_DOCKER_REGISTRY}"
+            echo "CNB_REPO_SLUG_LOWERCASE: ${CNB_REPO_SLUG_LOWERCASE}"
+
+            # 核心清理操作：移除所有非打印字符和空格
+            mirror=$(echo "$mirror" | tr -d '[:space:]' | tr -d '\n\r')
+            version=$(echo "$version" | tr -d '[:space:]' | tr -d '\n\r')
+            
+            # 进一步尝试去除可能的不可见字符（如 \u2060 等）
+            # 这是一个更通用的清理方法，确保只剩下标准的字母数字
+            mirror=$(echo "$mirror" | sed 's/[^[:print:]]//g')
+            version=$(echo "$version" | sed 's/[^[:print:]]//g')
+
+            echo "处理 mirror: $mirror"
+            echo "处理 version: $version"
+
+            # 通过 set-output 输出到 result
+            echo "##[set-output interior_mirror=$mirror]"
+            echo "##[set-output interior_version=$version]"
+          exports:
+            interior_mirror: INTERIOR_MIRROR
+            interior_version: INTERIOR_VERSION
+
+        - name: 构建并推送 Docker 镜像
+          script: |
+            echo "=============================="
+            echo "🔧 开始处理 web_trigger_build_docker_amd64_image"
+            echo "=============================="
+
+            # 1. 登录 Docker Registry
+            echo " 登录 Docker Registry: ${CNB_DOCKER_REGISTRY}"
+            docker login -u "${CNB_TOKEN_USER_NAME}" -p "${CNB_TOKEN}" "${CNB_DOCKER_REGISTRY}"
+            
+            IMAGE_ARCH="linux-amd64"
+            IMAGE_NAME="${CNB_REPO_SLUG_LOWERCASE}"  # 镜像名
+            DOCKER_IMAGE_LATEST="${CNB_DOCKER_REGISTRY}/${IMAGE_NAME}:latest-${IMAGE_ARCH}" # latest镜像地址
+            DOCKER_IMAGE_VERSION="" # 版本镜像地址
+            if [ "$INTERIOR_VERSION" != "latest" ]; then
+              DOCKER_IMAGE_VERSION="${CNB_DOCKER_REGISTRY}/${IMAGE_NAME}:${INTERIOR_VERSION}-${IMAGE_ARCH}"
+            fi
+
+            # 2. 构建 Docker 镜像
+            BUILD_ARGS="--build-arg ALPINE_VERSION=${INTERIOR_VERSION} --build-arg APK_MIRROR=${INTERIOR_MIRROR}"
+
+            if [ "$DOCKER_IMAGE_VERSION" == "" ]; then
+              echo " 构建 Docker 镜像: ${DOCKER_IMAGE_LATEST}"
+              docker build \
+                -f "./Dockerfile" \
+                -t "${DOCKER_IMAGE_LATEST}" \
+                ${BUILD_ARGS} .
+            else
+              echo " 构建 Docker 镜像: ${DOCKER_IMAGE_LATEST} ${DOCKER_IMAGE_VERSION}"
+              docker build \
+                -f "./Dockerfile" \
+                -t "${DOCKER_IMAGE_LATEST}" \
+                -t "${DOCKER_IMAGE_VERSION}" \
+                ${BUILD_ARGS} .
+            fi
+
+            # 3. 推送 Docker 镜像
+            if [ "$DOCKER_IMAGE_VERSION" == "" ]; then
+              echo " 推送 Docker 镜像: ${DOCKER_IMAGE_LATEST}"
+              docker push "${DOCKER_IMAGE_LATEST}"
+            else
+              echo " 推送 Docker 镜像: ${DOCKER_IMAGE_LATEST} ${DOCKER_IMAGE_VERSION}"
+              docker push "${DOCKER_IMAGE_LATEST}"
+              docker push "${DOCKER_IMAGE_VERSION}"
+            fi
+
+            echo "=============================="
+            echo "🎉 处理结束 web_trigger_build_docker_amd64_image"
+            echo "=============================="

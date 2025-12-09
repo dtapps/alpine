@@ -1,0 +1,72 @@
+branch:
+  - buttons:
+      - name: 打包 Docker 镜像（amd64）
+        description: 打包 Docker 镜像（amd64） 然后上传到 制品库
+        event: web_trigger_build_docker_amd64_image # 触发的 CI 事件名
+        permissions:
+          roles:
+            - owner
+            - master
+            - developer
+        inputs:
+          mirror:
+            description: 请选择镜像源
+            required: true
+            type: select
+            default: mirrors.cernet.edu.cn
+            options:
+              - name: 校园网联合
+                value: mirrors.cernet.edu.cn # https://help.mirrors.cernet.edu.cn/alpine/
+              - name: 腾讯云
+                value: mirrors.cloud.tencent.com # https://mirrors.cloud.tencent.com/alpine/
+              - name: 阿里云
+                value: mirrors.aliyun.com # https://developer.aliyun.com/mirror/alpine
+              - name: 阿里云
+                value: mirrors.volces.com # https://developer.volcengine.com/articles/7132039438225883144
+
+          version:
+            description: 请输入版本
+            required: false
+            type: input
+            default: latest
+
+      
+      - name: 打包 Docker 镜像（arm64）
+        description: 打包 Docker 镜像（arm64） 然后上传到 制品库
+        event: web_trigger_build_docker_arm64_image # 触发的 CI 事件名
+        permissions:
+          roles:
+            - owner
+            - master
+            - developer
+        inputs:
+          mirror:
+            description: 请选择镜像源
+            required: true
+            type: select
+            default: mirrors.cernet.edu.cn
+            options:
+              - name: 校园网联合
+                value: mirrors.cernet.edu.cn # https://help.mirrors.cernet.edu.cn/alpine/
+              - name: 腾讯云
+                value: mirrors.cloud.tencent.com # https://mirrors.cloud.tencent.com/alpine/
+              - name: 阿里云
+                value: mirrors.aliyun.com # https://developer.aliyun.com/mirror/alpine
+              - name: 阿里云
+                value: mirrors.volces.com # https://developer.volcengine.com/articles/7132039438225883144
+
+          version:
+            description: 请输入版本
+            required: false
+            type: input
+            default: latest
+
+      
+      - name: 合并 Docker 镜像
+        description: 合并 Docker 镜像 然后上传到 制品库
+        event: web_trigger_merge_manifest_docker # 触发的 CI 事件名
+        permissions:
+          roles:
+            - owner
+            - master
+            - developer
