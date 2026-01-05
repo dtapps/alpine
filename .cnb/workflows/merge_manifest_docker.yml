@@ -1,43 +1,18 @@
 "**":
   # 自定义按钮可触发的事件：web_trigger_merge_manifest_docker
-  # https://cnb.cool/loviselu/docker-buildx-multi-platform-example
-  # https://cnb.cool/examples/ecosystem/docker-buildx-multi-platform-example
-  # https://cnb.cool/examples/ecosystem/multiarch-docker-build-amd-arm
+  # https://cnb.cool/loviselu/docker-buildx-multi-platform-example  
+  # https://cnb.cool/examples/ecosystem/docker-buildx-multi-platform-example  
+  # https://cnb.cool/examples/ecosystem/multiarch-docker-build-amd-arm  
   web_trigger_merge_manifest_docker:
     - runner:
         tags: cnb:arch:amd64 # 指定 Runner 必须有这个标签
         cpus: 64 # 如有需要，可根据实际情况调整
       services:
         - docker # 启用 Docker 服务（用于 docker build/push）
-      imports: https://cnb.cool/dtapp/envs/-/blob/main/docker.yml # 导入外部环境变量/配置
+      imports:
+        - https://cnb.cool/dtapp/envs/-/blob/main/docker.yml  # 引入环境变量/配置
+        - .cnb/scripts/merge-manifest.sh  # 引入脚本
       stages:
         - name: 合并多架构清单
           script: |
-            echo "=============================="
-            echo "🔧 开始处理 web_trigger_merge_manifest_docker"
-            echo "=============================="
-
-            # 1. 登录 Docker Registry
-            echo " 登录 Docker Registry: ${CNB_DOCKER_REGISTRY}"
-            docker login -u "${CNB_TOKEN_USER_NAME}" -p "${CNB_TOKEN}" "${CNB_DOCKER_REGISTRY}"
-            IMAGE_NAME="${CNB_REPO_SLUG_LOWERCASE}"
-            
-            # 定义最终的统一标签和架构特定标签
-            FINAL_TAG="${CNB_DOCKER_REGISTRY}/${IMAGE_NAME}:latest"
-            
-            # 要合并 latest 标签
-            AMD64_TAG="${CNB_DOCKER_REGISTRY}/${IMAGE_NAME}:latest-linux-amd64"
-            ARM64_TAG="${CNB_DOCKER_REGISTRY}/${IMAGE_NAME}:latest-linux-arm64"
-
-            # 2. 创建 Manifest List (将两个独立镜像合并到 FINAL_TAG)
-            echo " 创建 Manifest List: ${FINAL_TAG} 指向 ${AMD64_TAG} 和 ${ARM64_TAG}"
-            docker manifest create ${FINAL_TAG} ${AMD64_TAG} ${ARM64_TAG}
-
-            # 3. 推送 Manifest List
-            # 这将把统一标签推送到仓库，用户拉取 :latest 时会自动选择架构。
-            echo " 推送 Manifest List: ${FINAL_TAG}"
-            docker manifest push ${FINAL_TAG}
-
-            echo "=============================="
-            echo "🎉 处理结束 web_trigger_merge_manifest_docker"
-            echo "=============================="
+            source .cnb/scripts/merge-manifest.sh

@@ -2,3 +2,55 @@ include:
   - .cnb/workflows/build_docker_amd64_image.yml
   - .cnb/workflows/build_docker_arm64_image.yml
   - .cnb/workflows/merge_manifest_docker.yml
+
+master:
+  # 每天 00:05 与 12:05（Asia/Shanghai）执行
+  "crontab: 5 0,12 * * *":
+    - name: build-amd64
+      runner:
+        tags: cnb:arch:amd64 # 指定 Runner 必须有这个标签
+        cpus: 64 # 如有需要，可根据实际情况调整
+      services:
+        - docker # 启用 Docker 服务（用于 docker build/push）
+      imports:
+        - https://cnb.cool/dtapp/envs/-/blob/main/docker.yml  # 引入环境变量/配置
+        - .cnb/scripts/build-amd64.sh  # 引入脚本
+      stages:
+        - name: 构建并推送 AMD64 镜像
+          env:
+            mirror: "mirrors.cernet.edu.cn"
+            version: "latest"
+          script: |
+            source .cnb/scripts/build-amd64.sh
+
+    - name: build-arm64
+      runner:
+        tags: cnb:arch:arm64:v8 # 指定 Runner 必须有这个标签
+        cpus: 16 # 如有需要，可根据实际情况调整
+      services:
+        - docker # 启用 Docker 服务（用于 docker build/push）
+      imports:
+        - https://cnb.cool/dtapp/envs/-/blob/main/docker.yml  # 引入环境变量/配置
+        - .cnb/scripts/build-arm64.sh  # 引入脚本
+      stages:
+        - name: 构建并推送 ARM64 镜像
+          env:
+            mirror: "mirrors.cernet.edu.cn"
+            version: "latest"
+          script: |
+            source .cnb/scripts/build-arm64.sh
+
+  # 每天 00:15 与 12:15（Asia/Shanghai）执行
+  "crontab: 15 0,12 * * *":
+    - name: merge-manifest
+      runner:
+        tags: cnb:arch:amd64 # 指定 Runner 必须有这个标签
+        cpus: 64 # 如有需要，可根据实际情况调整
+      services:
+        - docker # 启用 Docker 服务（用于 docker build/push）
+      imports:
+        - https://cnb.cool/dtapp/envs/-/blob/main/docker.yml  # 引入环境变量/配置
+        - .cnb/scripts/merge-manifest.sh  # 引入脚本
+      stages:
+        - name: 合并多架构清单
+          script: source .cnb/scripts/merge-manifest.sh
