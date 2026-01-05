@@ -3,7 +3,7 @@ include:
   - .cnb/workflows/build_docker_arm64_image.yml
   - .cnb/workflows/merge_manifest_docker.yml
 
-master:
+main:
   # 每天 00:05 与 12:05（Asia/Shanghai）执行
   "crontab: 5 0,12 * * *":
     - name: build-amd64
