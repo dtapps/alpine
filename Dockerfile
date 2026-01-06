@@ -2,7 +2,6 @@
 # 定义构建参数 (ARG)
 # ===================================================================
 ARG ALPINE_VERSION=latest
-ARG APK_MIRROR=mirrors.cernet.edu.cn
 
 # 使用官方 Alpine 作为基础镜像（轻量、安全）
 # Alpine 特点：体积小（约5MB）、安全、适合容器化部署
@@ -11,12 +10,16 @@ FROM alpine:${ALPINE_VERSION}
 # ===================================================================
 # STEP 1: 替换为自定义镜像源，加速软件包下载（国内用户必备）
 # 默认源 dl-cdn.alpinelinux.org 在国内访问较慢，替换为自定义镜像可大幅提升构建速度
-# sed -i：直接修改文件内容；&& apk update：更新包索引以获取最新软件列表
 # ===================================================================
-ARG APK_MIRROR
 RUN ALPINE_VER=$(cat /etc/alpine-release | cut -d'.' -f1,2) && \
-    echo "https://${APK_MIRROR}/alpine/v${ALPINE_VER}/main" > /etc/apk/repositories && \
-    echo "https://${APK_MIRROR}/alpine/v${ALPINE_VER}/community" >> /etc/apk/repositories && \
+    echo "https://mirrors.cernet.edu.cn/alpine/v${ALPINE_VER}/main" > /etc/apk/repositories && \
+    echo "https://mirrors.cernet.edu.cn/alpine/v${ALPINE_VER}/community" >> /etc/apk/repositories && \
+    echo "https://mirrors.cloud.tencent.com/alpine/v${ALPINE_VER}/main" >> /etc/apk/repositories && \
+    echo "https://mirrors.cloud.tencent.com/alpine/v${ALPINE_VER}/community" >> /etc/apk/repositories && \
+    echo "https://mirrors.aliyun.com/alpine/v${ALPINE_VER}/main" >> /etc/apk/repositories && \
+    echo "https://mirrors.aliyun.com/alpine/v${ALPINE_VER}/community" >> /etc/apk/repositories && \
+    echo "https://mirrors.volces.com/alpine/v${ALPINE_VER}/main" >> /etc/apk/repositories && \
+    echo "https://mirrors.volces.com/alpine/v${ALPINE_VER}/community" >> /etc/apk/repositories && \
     echo "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/main" >> /etc/apk/repositories && \
     echo "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/community" >> /etc/apk/repositories && \
     apk update --no-cache
@@ -57,8 +60,3 @@ RUN rm -rf \
     /var/cache/apk/* \
     /root/.cache \
     /var/tmp/*
-
-# ===================================================================
-# 清除 ENV 变量
-# ===================================================================
-ENV APK_MIRROR_ENV=

@@ -2,29 +2,23 @@
 # 构建并推送 ARM64 Docker 镜像
 # 用于 CNB 流水线，必须通过 `source` 执行以支持 set-output
 
-echo "原始 mirror: $mirror"
 echo "原始 version: $version"
 echo "CNB_DOCKER_REGISTRY: ${CNB_DOCKER_REGISTRY}"
 echo "CNB_REPO_SLUG_LOWERCASE: ${CNB_REPO_SLUG_LOWERCASE}"
 
 # 清理
-mirror=$(echo "$mirror" | tr -d '[:space:]' | tr -d '\n\r')
 version=$(echo "$version" | tr -d '[:space:]' | tr -d '\n\r')
-mirror=$(echo "$mirror" | sed 's/[^[:print:]]//g')
 version=$(echo "$version" | sed 's/[^[:print:]]//g')
 
 # 空 version 自动转为 "latest"
 [ -z "$version" ] && version="latest"
 
-echo "处理 mirror: $mirror"
 echo "处理 version: $version"
 
 # 输出变量供后续 stage 使用（必须 source 执行才生效）
-echo "##[set-output interior_mirror=$mirror]"
 echo "##[set-output interior_version=$version]"
 
 # 导出环境变量（供本 stage 后续命令使用）
-export INTERIOR_MIRROR="$mirror"
 export INTERIOR_VERSION="$version"
 
 # ========== 构建并推送 ==========
@@ -46,7 +40,7 @@ if [ "$INTERIOR_VERSION" != "latest" ]; then
 fi
 
 # 构建
-BUILD_ARGS="--build-arg ALPINE_VERSION=${INTERIOR_VERSION} --build-arg APK_MIRROR=${INTERIOR_MIRROR}"
+BUILD_ARGS="--build-arg ALPINE_VERSION=${INTERIOR_VERSION}"
 
 if [ -z "$DOCKER_IMAGE_VERSION" ]; then
   echo " 构建 Docker 镜像: ${DOCKER_IMAGE_LATEST}"
