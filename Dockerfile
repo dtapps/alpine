@@ -2,7 +2,7 @@
 # 定义构建参数 (ARG)
 # ===================================================================
 ARG ALPINE_VERSION=latest
-ARG APK_MIRROR=mirrors.aliyun.com
+ARG APK_MIRROR=mirrors.cernet.edu.cn
 
 # 使用官方 Alpine 作为基础镜像（轻量、安全）
 # Alpine 特点：体积小（约5MB）、安全、适合容器化部署
@@ -14,9 +14,12 @@ FROM alpine:${ALPINE_VERSION}
 # sed -i：直接修改文件内容；&& apk update：更新包索引以获取最新软件列表
 # ===================================================================
 ARG APK_MIRROR
-ENV APK_MIRROR_ENV=${APK_MIRROR}
-RUN sed -i "s|dl-cdn.alpinelinux.org|${APK_MIRROR_ENV}|g" /etc/apk/repositories \
-    && apk update --no-cache
+RUN ALPINE_VER=$(cat /etc/alpine-release | cut -d'.' -f1,2) && \
+    echo "https://${APK_MIRROR}/alpine/v${ALPINE_VER}/main" > /etc/apk/repositories && \
+    echo "https://${APK_MIRROR}/alpine/v${ALPINE_VER}/community" >> /etc/apk/repositories && \
+    echo "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/main" >> /etc/apk/repositories && \
+    echo "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/community" >> /etc/apk/repositories && \
+    apk update --no-cache
 
 # ===================================================================
 # STEP 2: 安装运行时必需的基础组件（最小化依赖）
