@@ -1,56 +1,34 @@
 include:
-  - .cnb/workflows/build_docker_amd64_image.yml
-  - .cnb/workflows/build_docker_arm64_image.yml
-  - .cnb/workflows/merge_manifest_docker.yml
+  - .cnb/workflows/build-image.yml
+  - .cnb/workflows/cnb-sechook.yml
+  - .cnb/workflows/code-review.yml
+  - .cnb/workflows/code-security-config.yml
+  - .cnb/workflows/codewiki.yml
+  - .cnb/workflows/knowledge-base.yml
+  - .cnb/workflows/sca.yml
 
 main:
-  # 每天 00:05 与 12:05（Asia/Shanghai）执行
-  "crontab: 5 0,12 * * *":
-    - name: build-amd64
+  # 每天 00:05（Asia/Shanghai）执行
+  # buildx 一次构建同时产出 amd64/arm64 与多架构 manifest list，无需再单独合并清单
+  'crontab: 5 0 * * *':
+    - name: build-image
       runner:
         tags: cnb:arch:amd64 # 指定 Runner 必须有这个标签
-        cpus: 64 # 如有需要，可根据实际情况调整
+        # cpus: 64 # 如有需要，可根据实际情况调整
+      # CNB 的 docker 服务默认已支持多架构 buildx，无需 options.rootlessBuildkitd
       services:
-        - docker # 启用 Docker 服务（用于 docker build/push）
+        - docker # 启用 Docker 服务（用于 docker buildx/push）
       imports:
-        - https://cnb.cool/dtapp/envs/-/blob/main/docker.yml  # 引入环境变量/配置
-        - .cnb/scripts/build-amd64.sh  # 引入脚本
+        - https://cnb.cool/dtapp/envs/-/blob/main/docker.yml # 引入环境变量/配置
+        - .cnb/scripts/build-image.sh # 引入脚本
       stages:
-        - name: 构建并推送 AMD64 镜像
-          env:
-            mirror: "mirrors.cernet.edu.cn"
-            version: "latest"
+        - name: 构建并推送多架构镜像
           script: |
-            source .cnb/scripts/build-amd64.sh
-
-    - name: build-arm64
-      runner:
-        tags: cnb:arch:arm64:v8 # 指定 Runner 必须有这个标签
-        cpus: 16 # 如有需要，可根据实际情况调整
-      services:
-        - docker # 启用 Docker 服务（用于 docker build/push）
-      imports:
-        - https://cnb.cool/dtapp/envs/-/blob/main/docker.yml  # 引入环境变量/配置
-        - .cnb/scripts/build-arm64.sh  # 引入脚本
-      stages:
-        - name: 构建并推送 ARM64 镜像
-          env:
-            mirror: "mirrors.cernet.edu.cn"
-            version: "latest"
-          script: |
-            source .cnb/scripts/build-arm64.sh
-
-  # 每天 00:15 与 12:15（Asia/Shanghai）执行
-  "crontab: 15 0,12 * * *":
-    - name: merge-manifest
-      runner:
-        tags: cnb:arch:amd64 # 指定 Runner 必须有这个标签
-        cpus: 64 # 如有需要，可根据实际情况调整
-      services:
-        - docker # 启用 Docker 服务（用于 docker build/push）
-      imports:
-        - https://cnb.cool/dtapp/envs/-/blob/main/docker.yml  # 引入环境变量/配置
-        - .cnb/scripts/merge-manifest.sh  # 引入脚本
-      stages:
-        - name: 合并多架构清单
-          script: source .cnb/scripts/merge-manifest.sh
+            source .cnb/scripts/build-image.sh
+        # 把本次产物的 digest / 体积 / 构建时间写成 commit 元数据。
+        # README 徽章从 /-/badge/annotation/commit/latest/{key} 读取这几个值。
+        - name: 写入镜像元数据
+          image: cnbcool/annotations:latest
+          settings:
+            type: ADD
+            fromJsonFile: .cnb/annotation.json

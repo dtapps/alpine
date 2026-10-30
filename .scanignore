@@ -1,0 +1,30 @@
+# CNB 代码安全扫描 · 公共忽略规则
+# https://docs.cnb.cool/zh/security/intro.html
+#
+# 语义（gitignore 风格）：本文件每一条都是「排除」；'!' 前缀才是重新纳入。
+# 对所有扫描能力生效。能力级差异才需要 .cnb/security/code_scan_config.yml，
+# 目前 secrets 与 software-composition-analysis 口径一致，统一写在这里。
+#
+# 原则：排除面保持最小。每多加一条，安全扫描面就少一块，按实际路径补，不要预先放宽。
+#
+# 本仓库是「一份 Alpine Dockerfile + CNB 流水线配置」，没有业务代码、没有依赖清单、
+# 没有测试用例，因此忽略规则只需要覆盖二进制资源这一项噪音源。
+
+# 二进制图片：.cnb/settings.yml 里用作 issue 按钮悬停图（bug.png）与 reaction 动图（hi.gif）。
+# secrets 对二进制做高熵匹配只会产生误报，SCA 也不会解析它们。
+# 若某次扫描并未对这两个文件报错，可以整段删除，让扫描面保持最大。
+.cnb/bug.png
+.cnb/hi.gif
+
+# 以下刻意【不】排除，已逐项确认过：
+#   .cnb/docker/Dockerfile        SCA 的扫描对象：apk add 的 tzdata/ca-certificates/curl/
+#                                 netcat-openbsd/bind-tools 等 OS 包漏洞要靠它发现，排除等于放弃检测。
+#   .cnb/scripts/build-image.sh   只通过 ${CNB_TOKEN} / ${CNB_TOKEN_USER_NAME} 取值，
+#                                 真实凭证存放在 imports 的 https://cnb.cool/dtapp/envs，不在仓库内。
+#   .cnb/workflows/**             流水线定义，同样只有 ${} 引用；保留才能发现「误把密钥写进 env」的改动。
+#   .cnb.yml / Makefile / .yamlfmt  配置与格式化规则，无凭证内容。
+#
+# 本仓库当前不存在、故不预设规则的路径（将来真出现再按实际路径补，不要提前放宽）：
+#   Go 测试 *_test.go 与 testdata/、fixtures/、__mocks__，前端 frontend/src/**、*.test.ts，
+#   依赖与构建产物 node_modules/、vendor/、bin/、dist/，以及 .pem/.key/.p12 等证书文件——一个都没有入库。
+# .git/** 扫描器本就看不到，无需在此声明；本仓库也没有 .gitignore。

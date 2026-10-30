@@ -1,0 +1,12 @@
+# CNB 代码安全扫描配置
+# https://docs.cnb.cool/zh/security/intro.html
+
+# 敏感信息扫描配置
+secrets:
+  scan:
+    ignoreFrom: .scanignore
+
+# 开源组件扫描配置
+software-composition-analysis:
+  scan:
+    ignoreFrom: .scanignore

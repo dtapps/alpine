@@ -1,8 +1,8 @@
 branch:
   - buttons:
-      - name: 打包 Docker 镜像（amd64）
-        description: 打包 Docker 镜像（amd64） 然后上传到 制品库
-        event: web_trigger_build_docker_amd64_image # 触发的 CI 事件名
+      - name: 打包 Docker 镜像（多架构 amd64 + arm64）
+        description: 构建并推送 amd64 / arm64 镜像与多架构 manifest list 到制品库
+        event: web_trigger_build_image # 触发的 CI 事件名
         permissions:
           roles:
             - owner
@@ -14,27 +14,9 @@ branch:
             required: false
             type: input
             default: latest
-
-      
-      - name: 打包 Docker 镜像（arm64）
-        description: 打包 Docker 镜像（arm64） 然后上传到 制品库
-        event: web_trigger_build_docker_arm64_image # 触发的 CI 事件名
-        permissions:
-          roles:
-            - owner
-            - master
-            - developer
-        inputs:
-          version:
-            description: 请输入版本
-            required: false
-            type: input
-            default: latest
-
-      
-      - name: 合并 Docker 镜像
-        description: 合并 Docker 镜像 然后上传到 制品库
-        event: web_trigger_merge_manifest_docker # 触发的 CI 事件名
+      - name: 生成 Code Wiki
+        description: 重新分析仓库并生成 Code Wiki 文档（本仓库不发版，故提供手动入口）
+        event: web_trigger_codewiki # 触发的 CI 事件名
         permissions:
           roles:
             - owner
