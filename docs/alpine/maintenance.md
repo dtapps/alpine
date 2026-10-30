@@ -4,10 +4,10 @@
 
 ## 谁在什么时候动这个镜像
 
-| 触发方式                           | 频率                          | `version` 取值                                                      | 产物                                                                  |
-|------------------------------------|-------------------------------|---------------------------------------------------------------------|-----------------------------------------------------------------------|
-| 定时构建 `crontab: 5 0 * * *`      | 每天 `00:05`（Asia/Shanghai） | 不传，走 `Dockerfile` 默认的 `latest`（跟随上游最新稳定版）         | 推送解析出的版本标签（如 `3.25.1`），再提升 `3.25` 与 `latest`        |
-| 手动按钮 `web_trigger_build_image` | 按需                          | 留空 / `latest`（跟随）、`3.25`、`3.25.1`、`3.25.1@sha256:<digest>` | 同上；标签里的版本号取解析值，即使用入参 `latest` 也不会出现 `latest` |
+| 触发方式                            | 频率                          | `version` 取值                                                      | 产物                                                                  |
+|-------------------------------------|-------------------------------|---------------------------------------------------------------------|-----------------------------------------------------------------------|
+| 定时构建 `crontab: 5 0 * * *`       | 每天 `00:05`（Asia/Shanghai） | 不传，走 `Dockerfile` 默认的 `latest`（跟随上游最新稳定版）         | 推送解析出的版本标签（如 `3.25.1`），再提升 `3.25` 与 `latest`        |
+| 手动按钮 `web_trigger_build_alpine` | 按需                          | 留空 / `latest`（跟随）、`3.25`、`3.25.1`、`3.25.1@sha256:<digest>` | 同上；标签里的版本号取解析值，即使用入参 `latest` 也不会出现 `latest` |
 
 定时任务刻意不传 `version`：脚本把空值解释为「用 `Dockerfile` 里的 `ARG ALPINE_VERSION`」，而它是 `latest`，于是每天重建就自动吃到上游当天的稳定版。具体版本不写死在代码里，而是构建时解析出来（`3.25.1`）并写进标签与 OCI label——**跟随最新**与**知道自己在用什么**因此可以同时成立。
 
@@ -68,7 +68,7 @@ docker run --rm alpine:latest sh -c \
 **第四步：本地构建并跑容器自检。**
 
 ```bash
-docker build -f .cnb/docker/Dockerfile -t alpine:local .
+docker build -f .cnb/docker/Dockerfile.alpine -t alpine:local .
 docker run --rm alpine:local sh -c \
   'cat /etc/alpine-release; date; cat /etc/timezone; cat /etc/apk/repositories; command -v curl drill nc nslookup'
 ```
@@ -91,14 +91,14 @@ docker run --rm alpine:local sh -c \
 
 ## 何时必须重建
 
-| 场景                                          | 是否重建   | 说明                                                          |
-|-----------------------------------------------|------------|---------------------------------------------------------------|
-| Alpine 发布新 point release 或新 minor        | 否（自动） | `FROM alpine:latest` 次日重建时自动跟过去，标签按解析版本命名 |
-| 上游仓库里的包发布安全更新                    | 否（自动） | 不缓存装包层，次日重建重新解析索引即带上                      |
-| SCA 报出 high / critical 且上游已修复         | 是         | 重建后 `image_digest` 变化即代表修复进入镜像                  |
-| 改了 `Dockerfile`、`build-image.sh`、workflow | 是         | 构建内容或构建逻辑变了，产物必须重出                          |
-| 手头只有 digest、想重新拉回那一份             | 否         | `docker pull <镜像>@sha256:<digest>`，不需要重建              |
-| 只改文档、只改 `.scanignore`                  | 否         | 不影响镜像内容，扫描与知识库各自会重跑                        |
+| 场景                                           | 是否重建   | 说明                                                          |
+|------------------------------------------------|------------|---------------------------------------------------------------|
+| Alpine 发布新 point release 或新 minor         | 否（自动） | `FROM alpine:latest` 次日重建时自动跟过去，标签按解析版本命名 |
+| 上游仓库里的包发布安全更新                     | 否（自动） | 不缓存装包层，次日重建重新解析索引即带上                      |
+| SCA 报出 high / critical 且上游已修复          | 是         | 重建后 `image_digest` 变化即代表修复进入镜像                  |
+| 改了 `Dockerfile`、`build-alpine.sh`、workflow | 是         | 构建内容或构建逻辑变了，产物必须重出                          |
+| 手头只有 digest、想重新拉回那一份              | 否         | `docker pull <镜像>@sha256:<digest>`，不需要重建              |
+| 只改文档、只改 `.scanignore`                   | 否         | 不影响镜像内容，扫描与知识库各自会重跑                        |
 
 ## 历史镜像不回溯
 
@@ -146,4 +146,4 @@ docker run --rm alpine:local sh -c \
 - [镜像与标签](images-and-tags.md)
 - [CI 流水线](ci-pipeline.md)
 - [安全基线](security-baseline.md)
-- [SECURITY](../SECURITY.md)
+- [SECURITY](../../SECURITY.md)

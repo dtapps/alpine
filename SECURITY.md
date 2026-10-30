@@ -1,6 +1,8 @@
 # 安全策略
 
-本仓库是一个自建 Alpine 基础镜像仓库：一份 `Dockerfile`，加上把它构建并推送到制品库的 CNB 流水线。镜像里只有 Alpine 官方源提供的包（`ca-certificates`、`curl`、`drill`、`netcat-openbsd`、`tzdata`），没有业务代码， 也没有自研二进制。
+本仓库是一个自建镜像仓库，目前包含两个镜像：Alpine 基础镜像（`.cnb/docker/Dockerfile.alpine`，Alpine 官方源提供的 `ca-certificates`、`curl`、`drill`、`netcat-openbsd`、`tzdata`）与 Chromium 无头浏览器镜像（`.cnb/docker/Dockerfile.chromium`，`chromium` 及其图形/渲染依赖，推到子路径 `/chromium`）。两者都没有业务代码，也没有自研二进制。
+
+下文的支持范围、标签与信任面以 **Alpine 基础镜像**为主；Chromium 镜像的攻击面、扫描口径与取舍见 [`docs/chromium/security-baseline.md`](docs/chromium/security-baseline.md)。
 
 ## 支持范围
 
@@ -11,7 +13,7 @@
 | `*-linux-amd64` / `*-linux-arm64` 单平台标签  | 由版本标签 `imagetools create` 派生，同样每天被覆盖                   |
 | 历史镜像（旧 digest）                         | 不回溯修复，用完即弃；只能靠当时记下的 `image_digest` 找回            |
 
-一句话：这个镜像的补丁节奏等于上游 Alpine 的补丁节奏。`FROM alpine:latest` 且不启用构建缓存，所以每次重建既会重新解析包索引、也会跟到上游当天的稳定版：包级补丁与新 point release 最迟次日自动进入镜像。上游已修而你的镜像还是旧 digest 时，重新触发一次构建即可，详见[维护手册](docs/maintenance.md)。
+一句话：这个镜像的补丁节奏等于上游 Alpine 的补丁节奏。`FROM alpine:latest` 且不启用构建缓存，所以每次重建既会重新解析包索引、也会跟到上游当天的稳定版：包级补丁与新 point release 最迟次日自动进入镜像。上游已修而你的镜像还是旧 digest 时，重新触发一次构建即可，详见[维护手册](docs/alpine/maintenance.md)。
 
 ## 如何报告问题
 

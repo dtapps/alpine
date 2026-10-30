@@ -24,7 +24,7 @@
 | 基座版本 | 浮动（`FROM alpine:latest`），解析出的版本与 `base.digest` 写进标签/元数据                                            | 每天跟上游才能及时吃到补丁；可追溯性交给标签与 `base_digest`  |
 | 凭证     | 仓库内零凭证                                                                                                          | 见下文「凭证只走 imports」                                    |
 
-容器内是 root、预装网络工具这两条是刻意选择而不是疏忽：这个镜像的用途是「拉下来就能进容器排障」，把 `nc`、`drill` 砍掉或加 `USER` 会让每个下游项目重复做一遍裁剪。`USER root` 写出来而不是依赖默认值，是为了让这条取舍在 `docker history` 与评审 diff 里都看得见；`ENTRYPOINT`/`CMD`/`HEALTHCHECK` 一律不设，基础镜像不该替下游决定入口。 取舍的完整表述在 [SECURITY](../SECURITY.md)。
+容器内是 root、预装网络工具这两条是刻意选择而不是疏忽：这个镜像的用途是「拉下来就能进容器排障」，把 `nc`、`drill` 砍掉或加 `USER` 会让每个下游项目重复做一遍裁剪。`USER root` 写出来而不是依赖默认值，是为了让这条取舍在 `docker history` 与评审 diff 里都看得见；`ENTRYPOINT`/`CMD`/`HEALTHCHECK` 一律不设，基础镜像不该替下游决定入口。 取舍的完整表述在 [SECURITY](../../SECURITY.md)。
 
 ## 流水线扫描能力
 
@@ -73,8 +73,8 @@ software-composition-analysis:
 
 | 路径                               | 留在扫描面内的理由                                                  |
 |------------------------------------|---------------------------------------------------------------------|
-| `.cnb/docker/Dockerfile`           | SCA 的扫描对象：`apk add` 的包漏洞靠它发现，排除等于放弃检测        |
-| `.cnb/scripts/build-image.sh`      | 只通过 `${CNB_TOKEN}` / `${CNB_TOKEN_USER_NAME}` 取值，无字面量凭证 |
+| `.cnb/docker/Dockerfile.alpine`    | SCA 的扫描对象：`apk add` 的包漏洞靠它发现，排除等于放弃检测        |
+| `.cnb/scripts/build-alpine.sh`     | 只通过 `${CNB_TOKEN}` / `${CNB_TOKEN_USER_NAME}` 取值，无字面量凭证 |
 | `.cnb/workflows/**`                | 只有 `${}` 引用，保留才能发现「误把密钥写进 `env`」的改动           |
 | `.cnb.yml`、`Makefile`、`.yamlfmt` | 配置与格式化规则，无凭证内容                                        |
 
@@ -85,7 +85,7 @@ software-composition-analysis:
 ```yaml
 imports:
   - https://cnb.cool/dtapp/envs/-/blob/main/docker.yml
-  - .cnb/scripts/build-image.sh
+  - .cnb/scripts/build-alpine.sh
 ```
 
 ```bash
@@ -94,7 +94,7 @@ grep -rn 'CNB_TOKEN' .cnb/
 grep -rn 'CNB_TOKEN_USER_NAME' .cnb/
 ```
 
-这也是为什么 `.scanignore` 不需要排除任何脚本：没有可排除的凭证，排除只会削弱「误写凭证」的检出能力。写死 token 会被敏感信息扫描拦下，但不能指望扫描兜底，硬性规则见 [CONTRIBUTING](../CONTRIBUTING.md)。
+这也是为什么 `.scanignore` 不需要排除任何脚本：没有可排除的凭证，排除只会削弱「误写凭证」的检出能力。写死 token 会被敏感信息扫描拦下，但不能指望扫描兜底，硬性规则见 [CONTRIBUTING](../../CONTRIBUTING.md)。
 
 脚本取用凭证的方式也是基线的一部分：`docker login` 走 `--password-stdin`，token 不出现在命令行参数里（那边的 东西会进进程列表、日志与审计记录）；脚本以 `set -eu` 运行，缺变量时立即失败而不是带着空密码继续；退出时 `trap` 删掉 `~/.docker/config.json`，不在 Runner 上留登录态。
 
@@ -119,15 +119,15 @@ SCA 报告出现 high / critical
                   让报告消失，否则「上游已修」的时点就无人发现
 ```
 
-历史镜像不做回溯修复，按 digest 固定的旧产物不会带上任何后续补丁。补丁会不断进入**新**构建，而标签每天被同名覆盖，所以「我这份是哪天的」只能靠 `built_at` 与 `image_digest` 判断。整体取舍见 [维护手册](maintenance.md) 与 [SECURITY](../SECURITY.md)。
+历史镜像不做回溯修复，按 digest 固定的旧产物不会带上任何后续补丁。补丁会不断进入**新**构建，而标签每天被同名覆盖，所以「我这份是哪天的」只能靠 `built_at` 与 `image_digest` 判断。整体取舍见 [维护手册](maintenance.md) 与 [SECURITY](../../SECURITY.md)。
 
 ## 报告问题
 
-先分清是「本仓库的配置/流水线问题」「上游 Alpine 包漏洞」还是「敏感问题」，三类的渠道不同，敏感问题不要开公开 issue。分类表与报告要素在 [SECURITY](../SECURITY.md)；提交前请先看 [CONTRIBUTING](../CONTRIBUTING.md) 的流程约定。
+先分清是「本仓库的配置/流水线问题」「上游 Alpine 包漏洞」还是「敏感问题」，三类的渠道不同，敏感问题不要开公开 issue。分类表与报告要素在 [SECURITY](../../SECURITY.md)；提交前请先看 [CONTRIBUTING](../../CONTRIBUTING.md) 的流程约定。
 
 ## 相关文档
 
-- [SECURITY](../SECURITY.md)
+- [SECURITY](../../SECURITY.md)
 - [CI 流水线](ci-pipeline.md)
 - [维护手册](maintenance.md)
 - [架构](architecture.md)

@@ -5,7 +5,7 @@
 ## 本地单架构
 
 ```bash
-docker build -f .cnb/docker/Dockerfile -t alpine:local .   # 默认 ALPINE_VERSION=latest
+docker build -f .cnb/docker/Dockerfile.alpine -t alpine:local .   # 默认 ALPINE_VERSION=latest
 docker run --rm alpine:local sh -c 'cat /etc/alpine-release; date; command -v curl drill'
 ```
 
@@ -27,7 +27,7 @@ LICENSE / Makefile / .yamlfmt / .scanignore
 .cnb/annotation.json  CI 生成的元数据文件
 ```
 
-效果是从约 3.0 MB 降到约 0.1 MB。上下文小有两个直接好处：构建开始时上传上下文的时间几乎归零；BuildKit 计算上下文摘要更快，缓存命中判断也不会因为无关文件改动而抖动。改 `.dockerignore` 时注意别把 `.cnb/docker/Dockerfile` 排除掉——它是唯一需要进上下文的文件。
+效果是从约 3.0 MB 降到约 0.1 MB。上下文小有两个直接好处：构建开始时上传上下文的时间几乎归零；BuildKit 计算上下文摘要更快，缓存命中判断也不会因为无关文件改动而抖动。改 `.dockerignore` 时注意别把 `.cnb/docker/Dockerfile.alpine` 排除掉——它是唯一需要进上下文的文件。
 
 ## 多架构的三种落地方式
 
@@ -46,7 +46,7 @@ LICENSE / Makefile / .yamlfmt / .scanignore
 ```bash
 docker buildx create --name alpine-multi --driver docker-container --bootstrap --use
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -f .cnb/docker/Dockerfile \
+  -f .cnb/docker/Dockerfile.alpine \
   -t alpine:local --output type=oci,dest=out.tar .
 ```
 
@@ -56,7 +56,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 | 参数           | 作用            | 本仓库用法                              |
 |----------------|-----------------|-----------------------------------------|
-| `-f`           | 指定 Dockerfile | `.cnb/docker/Dockerfile`                |
+| `-f`           | 指定 Dockerfile | `.cnb/docker/Dockerfile.alpine`         |
 | `--platform`   | 目标平台        | 一次构建两个平台                        |
 | `--build-arg`  | 传构建参数      | `ALPINE_VERSION` + 四个元数据参数       |
 | `--push`       | 构建完直接推送  | CI 唯一的落地方式                       |
@@ -74,7 +74,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ## CI 构建脚本逐段
 
-`.cnb/scripts/build-image.sh` 被 `source` 执行而不是 `sh build-image.sh`，因为 `##[set-output]` 与 `export` 都要在当前 shell 里生效。脚本是 POSIX `sh`（`#!/bin/sh` + `set -eu`），不依赖 bash 扩展；`local`、`[[ ]]`、`${var,,}`、herestring 一概不用，函数体需要局部变量时用子 shell。
+`.cnb/scripts/build-alpine.sh` 被 `source` 执行而不是 `sh build-alpine.sh`，因为 `##[set-output]` 与 `export` 都要在当前 shell 里生效。脚本是 POSIX `sh`（`#!/bin/sh` + `set -eu`），不依赖 bash 扩展；`local`、`[[ ]]`、`${var,,}`、herestring 一概不用，函数体需要局部变量时用子 shell。
 
 脚本头部的「设计约束」五条是整套流程的纲，后面每一段都在服务它们，改脚本前建议先读原文：
 
@@ -87,7 +87,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 3. 标签就是 alpine 版本号（不加日期）：先推 <版本>，冒烟通过后才提升 latest / minor。
    冒烟失败时 latest / minor 不动，对外契约不受影响。
 4. 必须 source 执行：##[set-output] 与 export 只在当前 shell 生效，
-   用 `sh build-image.sh` 跑会静默丢掉这两件事。
+   用 `sh build-alpine.sh` 跑会静默丢掉这两件事。
 5. 不启用 registry cache：唯一那层 RUN 一旦命中缓存就不会再执行 apk add，
    每日 cron 会永远装到同一批包。宁可每次多跑几秒，也要让「重建=刷新依赖」。
 ```
@@ -248,7 +248,7 @@ docker pull docker.cnb.cool/dtapp/alpine@sha256:<image_digest>
 ```bash
 docker login <your-registry>
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -f .cnb/docker/Dockerfile --build-arg ALPINE_VERSION=3.25.1 \
+  -f .cnb/docker/Dockerfile.alpine --build-arg ALPINE_VERSION=3.25.1 \
   -t <your-registry>/alpine:test --push .
 ```
 
@@ -257,7 +257,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ## 相关文档
 
-- [文档索引](README.md)
+- [文档索引](index.md)
 - [Dockerfile 解析](dockerfile.md)
 - [CI 流水线](ci-pipeline.md)
 - [构建元数据](metadata-and-badges.md)

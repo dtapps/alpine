@@ -1,5 +1,6 @@
 include:
-  - .cnb/workflows/build-image.yml
+  - .cnb/workflows/build-alpine.yml
+  - .cnb/workflows/build-chromium.yml
   - .cnb/workflows/cnb-sechook.yml
   - .cnb/workflows/code-review.yml
   - .cnb/workflows/code-security-config.yml
@@ -10,12 +11,13 @@ include:
 main:
   # 每天 00:05（Asia/Shanghai）执行
   # 一次 buildx 构建产出 amd64/arm64 多架构 manifest list，两个单平台标签从同一份
-  # manifest 派生（不再三次构建，digest 天然一致）。cron 不传 version：基座用
-  # Dockerfile 默认的 alpine:latest（每天跟上游），构建脚本把实际版本解析出来
+  # manifest 派生（不再三次构建，digest 天然一致）。
+  # 定时任务没有按钮输入，version 传不了（想钉版本只能手动触发），等价于留空：
+  # 基座用 Dockerfile 默认的 alpine:latest（每天跟上游），构建脚本把实际版本解析出来
   # （如 3.25.1），直接推 <实际版本> 标签，冒烟通过后才把 latest / minor 提升到该
   # digest；同名标签每天被覆盖，回查某天的产物要靠 annotation 里记录的 digest。
   'crontab: 5 0 * * *':
-    - name: build-image
+    - name: build-alpine
       runner:
         tags: cnb:arch:amd64 # 指定 Runner 必须有这个标签
         # cpus: 64 # 如有需要，可根据实际情况调整
@@ -27,20 +29,49 @@ main:
       # commit（https://cnb.cool/dtapp/envs/-/blob/<40 位 sha>/docker.yml）。
       imports:
         - https://cnb.cool/dtapp/envs/-/blob/main/docker.yml # 引入环境变量/配置
-        # 不要把 .cnb/scripts/build-image.sh 放进 imports：imports 会对被引入的文件
+        # 不要把 .cnb/scripts/build-alpine.sh 放进 imports：imports 会对被引入的文件
         # 做变量处理，脚本里的 ${...} 会被改写成带引号的字面量（CI 上表现为
-        # `sed: can't read "${DOCKERFILE:-.cnb/docker/Dockerfile}"`）。脚本在仓库里，
+        # `sed: can't read "${DOCKERFILE:-.cnb/docker/Dockerfile.alpine}"`）。脚本在仓库里，
         # 由下面的 `source` 直接执行即可。
       stages:
         - name: 构建并推送多架构镜像
           script: |
-            source .cnb/scripts/build-image.sh
+            source .cnb/scripts/build-alpine.sh
         # 把本次产物的 digest / 体积 / 构建时间写成 commit 元数据。
         # README 徽章从 /-/badge/annotation/commit/latest/{key} 读取这几个值。
         - name: 写入镜像元数据
           # cnbcool/annotations 目前只发 :latest，没有可固定的版本 tag，构建网络内也
           # 取不到 digest（hub.docker.com 不可达）。TODO 待其发布版本化 tag 后改成
           # @sha256:<digest>，避免插件升级悄悄改变元数据写入行为。
+          image: cnbcool/annotations:latest
+          settings:
+            type: ADD
+            fromJsonFile: .cnb/annotation.json
+
+  # 每天 01:30（Asia/Shanghai）执行，与上面 00:05 的 Alpine 基础镜像错峰：
+  # chromium 三变体多架构一次构建要重得多，两条一起跑只会抢 runner 和制品库带宽。
+  #
+  # 定时任务没有按钮输入，所以两个输入都不传，等价于：
+  #   version=latest                 → 基座跟上游 alpine:latest（当前是 3.24 分支）
+  #   expected_chromium_major=空      → 用 Dockerfile 里的断言值 155
+  # 上游在分支内换 Chromium 主版本时，装包层的 EXPECTED_CHROMIUM_MAJOR 断言会让构建
+  # 显式失败（定时任务某天变红通常就是这个原因）；确认渲染无回归后，要么更新 Dockerfile
+  # 默认值，要么手动点按钮并填 expected_chromium_major=<新主版本> 或 any。
+  'crontab: 30 1 * * *':
+    - name: build-chromium
+      runner:
+        tags: cnb:arch:amd64 # 指定 Runner 必须有这个标签
+        # cpus: 64 # chromium 构建明显更吃资源，需要时在这里调
+      services:
+        - docker # 启用 Docker 服务（用于 docker buildx/push）
+      imports:
+        - https://cnb.cool/dtapp/envs/-/blob/main/docker.yml # 引入环境变量/配置
+        # 不要把 .cnb/scripts/build-chromium.sh 放进 imports（${...} 会被改写）
+      stages:
+        - name: 构建并推送多架构镜像
+          script: |
+            source .cnb/scripts/build-chromium.sh
+        - name: 写入镜像元数据
           image: cnbcool/annotations:latest
           settings:
             type: ADD

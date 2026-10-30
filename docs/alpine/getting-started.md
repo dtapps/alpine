@@ -16,7 +16,7 @@
 
 基座默认跟随上游 `latest`，所以同一个标签隔几周再拉，里面的 alpine 版本可能已经从 `3.25.1` 变成 `3.25.2`——这是有意的，定时任务每天重建就是为了把上游补丁吃进来。「这一份到底是哪个版本」不会丢：版本标签名就是具体版本号（如 `3.25.1`），镜像 label 里还记着当时基座的 digest，commit 元数据里也有一份 `image_digest`。
 
-镜像内容由 `.cnb/docker/Dockerfile` 决定，逐段解析见 [Dockerfile 解析](dockerfile.md)。注意 DNS 工具是 `drill` 而不是 `dig`：两者语法接近但命令名不同，`dig +short` 在这里会 `command not found`。
+镜像内容由 `.cnb/docker/Dockerfile.alpine` 决定，逐段解析见 [Dockerfile 解析](dockerfile.md)。注意 DNS 工具是 `drill` 而不是 `dig`：两者语法接近但命令名不同，`dig +short` 在这里会 `command not found`。
 
 ## 拉取镜像
 
@@ -146,7 +146,7 @@ FROM docker.cnb.cool/dtapp/alpine@sha256:000000000000000000000000000000000000000
 
 ## 相关文档
 
-- [文档索引](README.md)
+- [文档索引](index.md)
 - [Dockerfile 解析](dockerfile.md)
 - [镜像与标签](images-and-tags.md)
-- [README](../README.md)
+- [README](README.md)

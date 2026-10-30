@@ -1,0 +1,83 @@
+'**':
+  # 自定义按钮可触发的事件：web_trigger_build_chromium
+  # 与 build-alpine.yml（Alpine 基础镜像）互相独立：这条流水线只构建 chromium，
+  # 产物推到 <registry>/<仓库 slug>/chromium，不碰 Alpine 基础镜像的标签。
+  # 三个变体（default / -cjk / -headless）在 .cnb/scripts/build-chromium.sh 里
+  # 一次跑完，单平台标签从同一份 manifest list 派生，冒烟通过后才写元数据。
+  web_trigger_build_chromium:
+    - name: build-chromium
+      runner:
+        tags: cnb:arch:amd64 # 指定 Runner 必须有这个标签
+        # chromium 三变体多架构比 Alpine 基础镜像重得多，需要时在这里加 cpus / memory
+      # CNB 的 docker 服务默认已支持多架构 buildx，无需 options.rootlessBuildkitd
+      services:
+        - docker # 启用 Docker 服务（用于 docker buildx/push）
+      # 远程 import 是可变引用：main 一改 CI 行为就变，PR 里看不到，也无法审计。
+      # TODO 收敛：把 docker.yml vendor 进 .cnb/envs/ 纳入评审，或至少钉到具体
+      # commit（https://cnb.cool/dtapp/envs/-/blob/<40 位 sha>/docker.yml）。
+      imports:
+        - https://cnb.cool/dtapp/envs/-/blob/main/docker.yml # 引入环境变量/配置
+        # 不要把 .cnb/scripts/build-chromium.sh 放进 imports：imports 会对被引入的
+        # 文件做变量处理，脚本里的 ${...} 会被改写成带引号的字面量。脚本在仓库里，
+        # 由下面的 `source` 直接执行即可。
+      stages:
+        - name: 构建并推送多架构镜像
+          script: |
+            source .cnb/scripts/build-chromium.sh
+        # 元数据键全部带 chromium_ 前缀：同一个 commit 上还有 Alpine 基础镜像的
+        # image_* 键，不加前缀会互相覆盖（README 徽章会显示另一条流水线的值）。
+        - name: 写入镜像元数据
+          # cnbcool/annotations 目前只发 :latest，没有可固定的版本 tag，构建网络内也
+          # 取不到 digest（hub.docker.com 不可达）。TODO 待其发布版本化 tag 后改成
+          # @sha256:<digest>，避免插件升级悄悄改变元数据写入行为。
+          image: cnbcool/annotations:latest
+          settings:
+            type: ADD
+            fromJsonFile: .cnb/annotation.json
+
+  # PR 校验：不推送，只证明「这份 Dockerfile 能构建、浏览器能起来」。
+  # 只对真正改到 chromium 构建输入的 PR 生效，纯文档 PR 直接跳过：
+  # 否则改一行 README 也要等一次多分钟的多架构构建。
+  pull_request:
+    - name: validate-chromium
+      runner:
+        tags: cnb:arch:amd64
+      services:
+        - docker
+      stages:
+        - name: 构建（不推送）与无头冒烟
+          script: |
+            set -eu
+            # 判断本次 PR 是否触及 chromium 的构建输入；判断不出来时按「要校验」处理
+            changed=""
+            if [ -n "${CNB_TARGET_BRANCH:-}" ] \
+              && git rev-parse --verify "origin/${CNB_TARGET_BRANCH}" >/dev/null 2>&1; then
+              changed="$(git diff --name-only "origin/${CNB_TARGET_BRANCH}...HEAD" 2>/dev/null || true)"
+            elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+              changed="$(git diff --name-only HEAD~1 2>/dev/null || true)"
+            fi
+            case "${changed}" in
+              *.cnb/docker/Dockerfile.chromium* | *.cnb/docker/Dockerfile.headless* | *.cnb/scripts/build-chromium.sh* | *.cnb/workflows/build-chromium.yml*)
+                echo "变更涉及 chromium 构建输入，开始校验"
+                ;;
+              "")
+                echo "无法确定变更范围，默认执行校验"
+                ;;
+              *)
+                echo "变更不涉及 chromium 构建输入，跳过校验："
+                printf '%s\n' "${changed}"
+                exit 0
+                ;;
+            esac
+            # 不传 ALPINE_VERSION / WITH_*，验证的就是 Dockerfile 里的默认值，
+            # 免得 PR 改了默认值却仍按旧值校验。
+            docker buildx build --platform linux/amd64 --load --pull \
+              -f .cnb/docker/Dockerfile.chromium -t alpine-chromium:pr . || exit 1
+            # 1) 二进制在、版本对
+            docker run --rm alpine-chromium:pr chromium --version || exit 1
+            # 2) 渲染栈可用：不进网络、不写文件，秒回
+            docker run --rm --shm-size=1g alpine-chromium:pr \
+              chromium --headless --no-sandbox --disable-dev-shm-usage \
+              --dump-dom about:blank || exit 1
+            # 3) 时区生效
+            docker run --rm alpine-chromium:pr date +%Z | grep -q 'CST' || exit 1

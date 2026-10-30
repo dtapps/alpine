@@ -11,7 +11,7 @@
 #   3. 标签就是 alpine 版本号（不加日期）：先推 <版本>，冒烟通过后才提升 latest / minor。
 #      同名标签每天被覆盖，历史只能靠元数据里的 digest 追；冒烟失败时 latest / minor 不动。
 #   4. 必须 source 执行：##[set-output] 与 export 只在当前 shell 生效，
-#      用 `sh build-image.sh` 跑会静默丢掉这两件事。
+#      用 `sh build-alpine.sh` 跑会静默丢掉这两件事。
 #   5. 不启用 registry cache：唯一那层 RUN 一旦命中缓存就不会再执行 apk add，
 #      每日 cron 会永远装到同一批包。宁可每次多跑几秒，也要让「重建=刷新依赖」。
 #
@@ -24,7 +24,7 @@ set -eu
 # 路径写死，不从环境变量读：CI 上曾出现过 `sed: can't read "${DOCKERFILE:-...}"`,
 # 原因是脚本被当成 import 处理时 ${...} 被改写成了字面量。这一行现在没有任何
 # 变量引用，谁来改写都影响不到它。
-DOCKERFILE=".cnb/docker/Dockerfile"
+DOCKERFILE=".cnb/docker/Dockerfile.alpine"
 PLATFORMS="linux/amd64,linux/arm64"
 EPOCH_DATE="1970-01-01T00:00:00Z"
 # 1 MiB：正常 alpine 派生镜像不可能低于此值，低于说明拿到的不是镜像清单

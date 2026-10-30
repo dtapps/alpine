@@ -12,29 +12,29 @@
 
 ```yaml
 include:
-  - .cnb/workflows/build-image.yml
+  - .cnb/workflows/build-alpine.yml
   # ... 共 7 个文件
 
 main:
   'crontab: 5 0 * * *':
-    - name: build-image
+    - name: build-alpine
       stages:
         - name: 构建并推送多架构镜像
           script: |
-            source .cnb/scripts/build-image.sh
+            source .cnb/scripts/build-alpine.sh
 ```
 
 两层键决定「什么时候跑」：
 
 - 顶层键是分支过滤器。`.cnb.yml` 里定时任务挂在 `main` 下，只对默认分支生效；7 个 workflow 文件统一用 `'**'`，对所有分支生效。
-- 事件名在过滤器下一层，值是流水线数组。`push`、`pull_request`、`tag_push`、`issue.open`、`web_trigger_build_image` 都是同级事件键；定时事件把 cron 表达式写进键名并加引号（`'crontab: 5 0 * * *'`），因为键值里有空格和 `*`。
+- 事件名在过滤器下一层，值是流水线数组。`push`、`pull_request`、`tag_push`、`issue.open`、`web_trigger_build_alpine` 都是同级事件键；定时事件把 cron 表达式写进键名并加引号（`'crontab: 5 0 * * *'`），因为键值里有空格和 `*`。
 
 ## 事件与 workflow 对应表
 
 | 事件                           | 定义位置                                                                   | 产物                                                                                                                           |
 |--------------------------------|----------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
-| `web_trigger_build_image`      | `workflows/build-image.yml`                                                | 解析基座版本 → 一次 `buildx build --push` 推版本标签 → 派生单平台标签 → 冒烟 → 提升 `latest`/`<minor>`；`.cnb/annotation.json` |
-| `'crontab: 5 0 * * *'`         | `.cnb.yml` 的 `main`                                                       | 同上；不传 `version`，走 `Dockerfile` 默认的 `alpine:latest`（每天跟上游），标签用解析出的实际版本                             |
+| `web_trigger_build_alpine`     | `workflows/build-alpine.yml`                                               | 解析基座版本 → 一次 `buildx build --push` 推版本标签 → 派生单平台标签 → 冒烟 → 提升 `latest`/`<minor>`；`.cnb/annotation.json` |
+| `'crontab: 5 0 * * *'`         | `.cnb.yml` 的 `main`                                                       | 同上；定时任务没有按钮输入，`version` 传不了，走 `Dockerfile` 默认的 `alpine:latest`（每天跟上游），标签用解析出的实际版本     |
 | `tag_push`                     | `workflows/codewiki.yml`                                                   | `${CNB_BUILD_WORKSPACE}/${CNB_REPO_SLUG}/codewiki` 下的 Code Wiki                                                              |
 | `web_trigger_codewiki`         | `workflows/codewiki.yml`                                                   | 同上                                                                                                                           |
 | `push`                         | `workflows/sca.yml`、`workflows/knowledge-base.yml`                        | SCA 全量报告附件、知识库索引                                                                                                   |
@@ -51,18 +51,18 @@ main:
 ```yaml
 imports:
   - https://cnb.cool/dtapp/envs/-/blob/main/docker.yml
-  - .cnb/scripts/build-image.sh
+  - .cnb/scripts/build-alpine.sh
 ```
 
-第一项来自组织 `envs` 仓库，提供构建所需的环境变量；凭证只以 `${CNB_TOKEN}`、`${CNB_TOKEN_USER_NAME}` 的形式出现在脚本里，真实值不进本仓库（见 [CONTRIBUTING](../CONTRIBUTING.md)）。第二项声明脚本依赖，脚本本身也在仓库内。
+第一项来自组织 `envs` 仓库，提供构建所需的环境变量；凭证只以 `${CNB_TOKEN}`、`${CNB_TOKEN_USER_NAME}` 的形式出现在脚本里，真实值不进本仓库（见 [CONTRIBUTING](../../CONTRIBUTING.md)）。第二项声明脚本依赖，脚本本身也在仓库内。
 
-这一项引用的是 `main` 分支而不是固定 commit：上游改了 `docker.yml`，本仓库下一次构建就会跟着变。这是组织统一 管理环境变量的代价，属于已知取舍（见 [SECURITY](../SECURITY.md)）。脚本因此不依赖其中任何「可选」变量：缺变量时 用 `:?` 展开立即失败，而不是带着空值静默降级。
+这一项引用的是 `main` 分支而不是固定 commit：上游改了 `docker.yml`，本仓库下一次构建就会跟着变。这是组织统一 管理环境变量的代价，属于已知取舍（见 [SECURITY](../../SECURITY.md)）。脚本因此不依赖其中任何「可选」变量：缺变量时 用 `:?` 展开立即失败，而不是带着空值静默降级。
 
 真正执行发生在 stages 里，且必须用 `source`：
 
 ```bash
-source .cnb/scripts/build-image.sh   # 正确：变量与输出留在当前 shell
-sh .cnb/scripts/build-image.sh       # 错误：set-output 与 export 都随子进程消失
+source .cnb/scripts/build-alpine.sh   # 正确：变量与输出留在当前 shell
+sh .cnb/scripts/build-alpine.sh       # 错误：set-output 与 export 都随子进程消失
 ```
 
 原因写在脚本头部：它要 `printf '##[set-output interior_version=%s\n' "${ALPINE_REAL}"` 把解析出的基座版本交给 CNB 采集，再 `export INTERIOR_VERSION`/`IMAGE_VERSION` 给同一步里的后续命令用。换成 `sh` 执行，这两件事都发生在子进程里，外层拿不到。
@@ -154,23 +154,23 @@ buildx 默认会给推送的 index 追加 attestation 清单：provenance（默�
 
 ### 为什么构建上下文要先排除
 
-`.dockerignore` 把 `.git`（约 1.8 MB）、`docs/`、`*.md`、`LICENSE`、`Makefile` 与工具配置全部排除， 构建上下文从 3.0 MB 降到约 0.1 MB。镜像里只用得上 `.cnb/docker/Dockerfile`，其余都是每次构建都要重新 打包上传的传输噪声；上下文越小，构建开始得越快，也越不容易把本地未提交的杂物带进镜像。
+`.dockerignore` 把 `.git`（约 1.8 MB）、`docs/`、`*.md`、`LICENSE`、`Makefile` 与工具配置全部排除， 构建上下文从 3.0 MB 降到约 0.1 MB。镜像里只用得上 `.cnb/docker/Dockerfile.alpine`，其余都是每次构建都要重新 打包上传的传输噪声；上下文越小，构建开始得越快，也越不容易把本地未提交的杂物带进镜像。
 
 ## 插件职责
 
-| 插件镜像                           | 出现位置                             | 职责与关键参数                                                                 |
-|------------------------------------|--------------------------------------|--------------------------------------------------------------------------------|
-| `cnbcool/annotations:latest`       | `build-image.yml`、`.cnb.yml` `main` | `type: ADD` + `fromJsonFile: .cnb/annotation.json`，写 commit 元数据           |
-| `cnbcool/codewiki:latest`          | `codewiki.yml`                       | 生成 Code Wiki，`git_doc_dir` 指定落盘目录，`timeout: 3h`                      |
-| `cnbcool/knowledge-base`           | `knowledge-base.yml`                 | `include: '**/**.md'`、`issueSyncEnabled: true`、`ignoreProcessFailures: true` |
-| `cnbcool/sca-vulnerability:latest` | `sca.yml`                            | 组件漏洞扫描，`scanMode: full/diff`、`publish: true`、`failOnSeverity: high`   |
-| `cnbcool/sca-license:latest`       | `sca.yml`                            | License 扫描，参数同上                                                         |
-| `cnbcool/sca-sbom:latest`          | `sca.yml`                            | SBOM，`format: spdx`                                                           |
-| `cnbcool/code-review:latest`       | `code-review.yml`                    | PR 上的 AI 评审，`comment`、`min_severity`、`exclude_categories`、`model` 等   |
-| `cnbcool/cnb-sechook`              | `cnb-sechook.yml`                    | 汇总扫描结果与敏感信息统计，`max_display_authors: 5`                           |
-| `cnbcool/code-security-config`     | `code-security-config.yml`           | `args: [validate]`，校验扫描配置本身合法                                       |
+| 插件镜像                           | 出现位置                              | 职责与关键参数                                                                 |
+|------------------------------------|---------------------------------------|--------------------------------------------------------------------------------|
+| `cnbcool/annotations:latest`       | `build-alpine.yml`、`.cnb.yml` `main` | `type: ADD` + `fromJsonFile: .cnb/annotation.json`，写 commit 元数据           |
+| `cnbcool/codewiki:latest`          | `codewiki.yml`                        | 生成 Code Wiki，`git_doc_dir` 指定落盘目录，`timeout: 3h`                      |
+| `cnbcool/knowledge-base`           | `knowledge-base.yml`                  | `include: '**/**.md'`、`issueSyncEnabled: true`、`ignoreProcessFailures: true` |
+| `cnbcool/sca-vulnerability:latest` | `sca.yml`                             | 组件漏洞扫描，`scanMode: full/diff`、`publish: true`、`failOnSeverity: high`   |
+| `cnbcool/sca-license:latest`       | `sca.yml`                             | License 扫描，参数同上                                                         |
+| `cnbcool/sca-sbom:latest`          | `sca.yml`                             | SBOM，`format: spdx`                                                           |
+| `cnbcool/code-review:latest`       | `code-review.yml`                     | PR 上的 AI 评审，`comment`、`min_severity`、`exclude_categories`、`model` 等   |
+| `cnbcool/cnb-sechook`              | `cnb-sechook.yml`                     | 汇总扫描结果与敏感信息统计，`max_display_authors: 5`                           |
+| `cnbcool/code-security-config`     | `code-security-config.yml`            | `args: [validate]`，校验扫描配置本身合法                                       |
 
-插件镜像多数只有 `:latest`（`cnbcool/annotations` 目前没有版本化 tag，构建网络内也取不到它的 digest）， 所以插件升级不被本仓库控制。这是已知的供应链薄弱点，写在 [SECURITY](../SECURITY.md) 的已知取舍里； 脚本侧的对策是「元数据 key 结构固定 + 冒烟核对 OCI 标签」，插件行为一变，下一次构建就能看出来。
+插件镜像多数只有 `:latest`（`cnbcool/annotations` 目前没有版本化 tag，构建网络内也取不到它的 digest）， 所以插件升级不被本仓库控制。这是已知的供应链薄弱点，写在 [SECURITY](../../SECURITY.md) 的已知取舍里； 脚本侧的对策是「元数据 key 结构固定 + 冒烟核对 OCI 标签」，插件行为一变，下一次构建就能看出来。
 
 扫描策略与忽略规则见[安全基线](security-baseline.md)，插件参数排错见[故障排查](troubleshooting.md)。
 
@@ -178,10 +178,10 @@ buildx 默认会给推送的 index 追加 attestation 清单：provenance（默�
 
 按钮定义在 `branch.buttons` 下，字段固定为 `name`、`description`、`event`、`permissions.roles`，可选 `inputs`：
 
-| 按钮                                     | event                     | 权限                       | 输入                                                                       |
-|------------------------------------------|---------------------------|----------------------------|----------------------------------------------------------------------------|
-| 打包 Docker 镜像（多架构 amd64 + arm64） | `web_trigger_build_image` | owner / master / developer | `version`，`required: false`，`default: ''`（留空 = 跟随 `alpine:latest`） |
-| 生成 Code Wiki                           | `web_trigger_codewiki`    | owner / master / developer | 无                                                                         |
+| 按钮                                     | event                      | 权限                       | 输入                                                                       |
+|------------------------------------------|----------------------------|----------------------------|----------------------------------------------------------------------------|
+| 打包 Alpine 镜像（多架构 amd64 + arm64） | `web_trigger_build_alpine` | owner / master / developer | `version`，`required: false`，`default: ''`（留空 = 跟随 `alpine:latest`） |
+| 生成 Code Wiki                           | `web_trigger_codewiki`     | owner / master / developer | 无                                                                         |
 
 `version` 留空与填 `latest` 等价，都表示「跟随上游最新稳定版」；也可以填 `3.25`（跟随该分支补丁）、`3.25.1`（钉死 patch）或 `3.25.1@sha256:<64 位 hex>`（位级复现）。其它值会被脚本白名单拒绝，所以在按钮上写错不会跑出一半才失败。
 
@@ -193,7 +193,7 @@ buildx 默认会给推送的 index 追加 attestation 清单：provenance（默�
 2. 新增文件必须加进 `.cnb.yml` 的 `include`，忘记就等于没写；改已有文件不需要动 `include`；
 3. 需要手动入口时在 `.cnb/web_trigger.yml` 加按钮，`event` 与 workflow 事件键逐字一致，权限只给需要的角色；
 4. 改事件名要同时改 `web_trigger.yml`、`include` 引用与文档，改 inputs 要同时改脚本里读变量的地方；
-5. 推送逻辑改动落在 `.cnb/scripts/build-image.sh`，失败必须显式 `exit 1`；提交前跑 `make format`。
+5. 推送逻辑改动落在 `.cnb/scripts/build-alpine.sh`，失败必须显式 `exit 1`；提交前跑 `make format`。
 
 ## 典型失败与排查入口
 

@@ -1,13 +1,13 @@
 '**':
-  # 自定义按钮可触发的事件：web_trigger_build_image
+  # 自定义按钮可触发的事件：web_trigger_build_alpine
   # 单条流水线内用 docker buildx 一次构建 amd64 + arm64，直接产出多架构 manifest list；
   # 两个单平台标签从这份 manifest 派生。基座默认 alpine:latest（每天跟上游），
   # 脚本解析出实际版本后直接用它当标签（同名标签每天覆盖），latest / minor 在冒烟
   # 通过后按 digest 提升；要钉住某次产物请用元数据里记录的 digest。
   # https://cnb.cool/loviselu/docker-buildx-multi-platform-example
   # https://cnb.cool/examples/ecosystem/docker-buildx-multi-platform-example
-  web_trigger_build_image:
-    - name: build-image
+  web_trigger_build_alpine:
+    - name: build-alpine
       runner:
         tags: cnb:arch:amd64 # 指定 Runner 必须有这个标签
         # cpus: 64 # 如有需要，可根据实际情况调整
@@ -19,14 +19,14 @@
       # commit（https://cnb.cool/dtapp/envs/-/blob/<40 位 sha>/docker.yml）。
       imports:
         - https://cnb.cool/dtapp/envs/-/blob/main/docker.yml # 引入环境变量/配置
-        # 不要把 .cnb/scripts/build-image.sh 放进 imports：imports 会对被引入的文件
+        # 不要把 .cnb/scripts/build-alpine.sh 放进 imports：imports 会对被引入的文件
         # 做变量处理，脚本里的 ${...} 会被改写成带引号的字面量（CI 上表现为
-        # `sed: can't read "${DOCKERFILE:-.cnb/docker/Dockerfile}"`）。脚本在仓库里，
+        # `sed: can't read "${DOCKERFILE:-.cnb/docker/Dockerfile.alpine}"`）。脚本在仓库里，
         # 由下面的 `source` 直接执行即可。
       stages:
         - name: 构建并推送多架构镜像
           script: |
-            source .cnb/scripts/build-image.sh
+            source .cnb/scripts/build-alpine.sh
         # 把本次产物的 digest / 体积 / 构建时间写成 commit 元数据。
         # README 徽章从 /-/badge/annotation/commit/latest/{key} 读取这几个值。
         - name: 写入镜像元数据

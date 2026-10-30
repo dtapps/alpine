@@ -49,7 +49,7 @@ docker manifest inspect docker.cnb.cool/dtapp/alpine:3.25.1-linux-amd64
 
 ## version 输入的校验规则
 
-脚本对 `version` 的处理是白名单，只接受这几种形态（`.cnb/scripts/build-image.sh`）：
+脚本对 `version` 的处理是白名单，只接受这几种形态（`.cnb/scripts/build-alpine.sh`）：
 
 | 输入                        | 含义                                                     |
 |-----------------------------|----------------------------------------------------------|
@@ -114,7 +114,7 @@ digest 与基座信息的来源：
 
 ## 改名与删除标签的兼容流程
 
-标签命名是对外契约（见 [CONTRIBUTING](../CONTRIBUTING.md) 硬性规则），`latest`、`3.25`、`<版本>` 及其 `-linux-{arch}` 变体已有下游在用，改名前先在 issue 里讨论。落地顺序：
+标签命名是对外契约（见 [CONTRIBUTING](../../CONTRIBUTING.md) 硬性规则），`latest`、`3.25`、`<版本>` 及其 `-linux-{arch}` 变体已有下游在用，改名前先在 issue 里讨论。落地顺序：
 
 1. 脚本里给新名字和旧名字同时打标签，一次构建双写；
 2. 通知下游切换到新名字，留出迁移窗口；
@@ -129,11 +129,11 @@ digest 与基座信息的来源：
 - `-linux-amd64` / `-linux-arm64` 与同一版本标签里对应平台的条目是同一个 digest，不做单独维护。
 - 制品库只负责存储与分发，不校验来源真实性（镜像未签名），强校验只能靠 digest。
 
-以上取舍的完整表述见 [SECURITY](../SECURITY.md)。
+以上取舍的完整表述见 [SECURITY](../../SECURITY.md)。
 
 ## 相关文档
 
 - [开始使用](getting-started.md)
 - [CI 流水线](ci-pipeline.md)
 - [构建元数据与徽章](metadata-and-badges.md)
-- [安全策略](../SECURITY.md)
+- [安全策略](../../SECURITY.md)

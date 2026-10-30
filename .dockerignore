@@ -1,4 +1,4 @@
-# 构建上下文只需要 .cnb/docker/Dockerfile（由 -f 指定），其余全部是传输噪声。
+# 构建上下文只需要 .cnb/docker 下的 Dockerfile*（由 -f 指定），其余全部是传输噪声。
 # 当前仓库 3.0 MB，其中 .git 占 1.8 MB：不忽略的话每次构建都要上传一遍。
 
 .git

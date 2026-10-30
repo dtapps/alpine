@@ -44,7 +44,7 @@ FROM alpine:${ALPINE_VERSION}
 要临时钉住时不必改文件，传参即可：
 
 ```bash
-docker build -f .cnb/docker/Dockerfile --build-arg ALPINE_VERSION=3.25.1 -t alpine:local .
+docker build -f .cnb/docker/Dockerfile.alpine --build-arg ALPINE_VERSION=3.25.1 -t alpine:local .
 ```
 
 传一个 Docker Hub 上不存在的 tag（例如 `3.99`）会在 `FROM` 阶段直接失败，不会进入后面的 `RUN`；这是最省时间的失败方式。
@@ -179,7 +179,7 @@ ENV TZ=Asia/Shanghai \
 
 理由：它是**基础调试镜像**，进容器就要能 `apk add`、改配置、连端口；一上来套 `USER`，第一件事就卡在权限上，与用途冲突。
 
-代价是明确的：任何以它为基座的生产镜像默认 root。所以这件事在 [SECURITY](../SECURITY.md) 里被写成「已知取舍」而不是漏洞，正确做法是下游自己补：
+代价是明确的：任何以它为基座的生产镜像默认 root。所以这件事在 [SECURITY](../../SECURITY.md) 里被写成「已知取舍」而不是漏洞，正确做法是下游自己补：
 
 ```dockerfile
 FROM docker.cnb.cool/dtapp/alpine:latest
@@ -207,12 +207,12 @@ USER app
 「清理必须单独放在最后一层」这个旧结论只对了一半——放在最后一层确实避免了「新层被清掉」的荒谬情况，但只要清理和安装不在同一层，被删的东西就还在镜像里。正确的规则是把两件事绑在同一个 `RUN` 里：
 
 - **同一个层里装完就删**才有意义。本镜像主要靠 `apk add --no-cache` 让缓存根本不落盘，末尾的 `rm -rf` 是兜底，负责 `/tmp`、`/root/.cache`、`/var/tmp` 这类零散残留。
-- **新增 `RUN` 要么并入这一层，要么自带同层清理**。这是 [CONTRIBUTING](../CONTRIBUTING.md) 里写明的规则。单独加一个「清理层」不再是允许的做法，因为它清不掉任何东西。
+- **新增 `RUN` 要么并入这一层，要么自带同层清理**。这是 [CONTRIBUTING](../../CONTRIBUTING.md) 里写明的规则。单独加一个「清理层」不再是允许的做法，因为它清不掉任何东西。
 
 本地确认层结构：
 
 ```bash
-docker build -f .cnb/docker/Dockerfile -t alpine:local .   # 默认跟随上游 latest
+docker build -f .cnb/docker/Dockerfile.alpine -t alpine:local .   # 默认跟随上游 latest
 docker history alpine:local
 ```
 
@@ -222,12 +222,12 @@ docker history alpine:local
 
 ## 新增包的标准
 
-来自 [CONTRIBUTING](../CONTRIBUTING.md) 的硬性规则：新增包要在 PR 里说明「解决什么场景」「增加多少体积」，能 `--no-cache` 的不留缓存。
+来自 [CONTRIBUTING](../../CONTRIBUTING.md) 的硬性规则：新增包要在 PR 里说明「解决什么场景」「增加多少体积」，能 `--no-cache` 的不留缓存。
 
 先量体积再谈必要性（以已装的 `curl` 为例，换成待评估的包名即可）：
 
 ```bash
-docker build -f .cnb/docker/Dockerfile -t alpine:local .
+docker build -f .cnb/docker/Dockerfile.alpine -t alpine:local .
 docker run --rm alpine:local apk info -s curl
 docker image ls alpine:local
 ```
@@ -239,7 +239,7 @@ docker image ls alpine:local
 改完 Dockerfile 的验证命令：
 
 ```bash
-docker build -f .cnb/docker/Dockerfile -t alpine:local .
+docker build -f .cnb/docker/Dockerfile.alpine -t alpine:local .
 docker run --rm alpine:local sh -c 'cat /etc/apk/repositories; command -v curl nc drill nslookup'
 docker run --rm alpine:local sh -c 'cat /etc/timezone; readlink -f /etc/localtime; date +%Z'
 docker image inspect alpine:local --format '{{json .Config.Labels}}'
@@ -251,7 +251,7 @@ Dockerfile 由 `dockerfmt` 格式化，改完跑 `make format-docker`；CI 不�
 
 ## 相关文档
 
-- [文档索引](README.md)
+- [文档索引](index.md)
 - [APK 源与网络](mirrors.md)
 - [快速上手](getting-started.md)
 - [构建](build.md)

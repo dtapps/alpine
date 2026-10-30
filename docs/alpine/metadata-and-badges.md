@@ -5,7 +5,7 @@
 ## 链路
 
 ```text
-build-image.sh
+build-alpine.sh
   ├─ 解析基座                      一次性容器读 /etc/alpine-release → ALPINE_REAL（如 3.25.1）
   ├─ 记录基座 digest               imagetools inspect alpine:latest → BASE_DIGEST
   ├─ 构建 + 派生 + 冒烟 + 提升     产出 ${STAMP}（版本标签）、-linux-{amd64,arm64}、latest、${MINOR}

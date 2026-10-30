@@ -10,11 +10,11 @@
          │                        │                      │                    │
          ▼                        ▼                      ▼                    ▼
 流水线层（.cnb.yml include）
-  build-image.yml          .cnb.yml main          codewiki.yml       sca.yml / code-review.yml
+  build-alpine.yml          .cnb.yml main          codewiki.yml       sca.yml / code-review.yml
                                                                      knowledge-base.yml / ...
          │
          ▼
-构建层（build-image.sh，被 source 执行）
+构建层（build-alpine.sh，被 source 执行）
   version 白名单校验 → 解析基座版本与 digest → docker login --password-stdin → buildx 自检
     ├─ 解析基座：一次性容器读 /etc/alpine-release → 3.25.1；imagetools 取 alpine:latest 的 digest
     ├─ 一次 buildx build --platform linux/amd64,linux/arm64 --push
@@ -46,7 +46,7 @@
 
 | 事件                           | 来源                  | 做什么                                                   | 配置                                                                        |
 |--------------------------------|-----------------------|----------------------------------------------------------|-----------------------------------------------------------------------------|
-| `web_trigger_build_image`      | 页面按钮              | 一次多架构构建、派生单平台标签、冒烟后提升、写元数据     | `web_trigger.yml` → `build-image.yml`                                       |
+| `web_trigger_build_alpine`     | 页面按钮              | 一次多架构构建、派生单平台标签、冒烟后提升、写元数据     | `web_trigger.yml` → `build-alpine.yml`                                      |
 | `crontab: 5 0 * * *`           | 定时（Asia/Shanghai） | 同上；不传 `version`，跟随 `alpine:latest`（每天跟上游） | `.cnb.yml` 的 `main`                                                        |
 | `tag_push`                     | `git push --tags`     | 生成 Code Wiki 并入库知识库                              | `codewiki.yml`                                                              |
 | `web_trigger_codewiki`         | 页面按钮              | 同 Code Wiki，手动入口                                   | `web_trigger.yml` → `codewiki.yml`                                          |
@@ -55,22 +55,22 @@
 | `pull_request.target`          | PR 指向目标分支       | SCA 增量扫描并按 `failOnSeverity: high` 门禁             | `sca.yml`                                                                   |
 | `issue.open` / `issue.comment` | Issue                 | 知识库同步                                               | `knowledge-base.yml`                                                        |
 
-手动按钮共两个：「打包 Docker 镜像（多架构 amd64 + arm64）」与「生成 Code Wiki」，都要求 owner / master / developer 角色。
+手动按钮共两个：「打包 Alpine 镜像（多架构 amd64 + arm64）」与「生成 Code Wiki」，都要求 owner / master / developer 角色。
 
 ## 仓库文件职责
 
 | 路径                                      | 作用                                            |
 |-------------------------------------------|-------------------------------------------------|
 | `.cnb.yml`                                | 流水线入口：`include` 各 workflow，定义定时任务 |
-| `.cnb/workflows/build-image.yml`          | 按钮触发的构建流水线                            |
+| `.cnb/workflows/build-alpine.yml`         | 按钮触发的构建流水线                            |
 | `.cnb/workflows/sca.yml`                  | 漏洞 / License / SBOM 扫描                      |
 | `.cnb/workflows/code-review.yml`          | PR 上的 AI 代码评审                             |
 | `.cnb/workflows/cnb-sechook.yml`          | PR 上汇总扫描与敏感信息统计                     |
 | `.cnb/workflows/code-security-config.yml` | 校验安全扫描配置本身是否合法                    |
 | `.cnb/workflows/codewiki.yml`             | Code Wiki 生成（tag 与按钮两条入口）            |
 | `.cnb/workflows/knowledge-base.yml`       | 知识库构建与 Issue 同步                         |
-| `.cnb/scripts/build-image.sh`             | 构建、推送、元数据汇总的实际逻辑                |
-| `.cnb/docker/Dockerfile`                  | 镜像定义                                        |
+| `.cnb/scripts/build-alpine.sh`            | 构建、推送、元数据汇总的实际逻辑                |
+| `.cnb/docker/Dockerfile.alpine`           | 镜像定义                                        |
 | `.cnb/web_trigger.yml`                    | 自定义按钮、权限、输入项                        |
 | `.cnb/settings.yml`                       | 仓库界面资源（issue 按钮图、reaction 动图）     |
 | `.cnb/security/code_scan_config.yml`      | 安全扫描配置，`ignoreFrom` 指向 `.scanignore`   |
@@ -80,7 +80,7 @@
 | `.dockerignore`                           | 构建上下文排除清单，把上下文压到约 0.1 MB       |
 | `docs/`                                   | 本目录：分册文档                                |
 
-Dockerfile 放在 `.cnb/docker/` 而不是根目录，是为了让 `.cnb/` 自成一体地承载「流水线 + 镜像定义」；本地构建时用 `-f .cnb/docker/Dockerfile` 显式指定，构建上下文仍是仓库根目录。
+Dockerfile 放在 `.cnb/docker/` 而不是根目录，是为了让 `.cnb/` 自成一体地承载「流水线 + 镜像定义」；本地构建时用 `-f .cnb/docker/Dockerfile.alpine` 显式指定，构建上下文仍是仓库根目录。
 
 ## 构建链路拆解
 
@@ -128,7 +128,7 @@ Dockerfile 放在 `.cnb/docker/` 而不是根目录，是为了让 `.cnb/` 自�
 
 ## 相关文档
 
-- [文档索引](README.md)
+- [文档索引](index.md)
 - [CI 流水线](ci-pipeline.md)
 - [构建](build.md)
-- [README](../README.md)
+- [README](README.md)

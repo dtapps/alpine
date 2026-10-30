@@ -6,7 +6,7 @@
 
 - 官方源 `dl-cdn.alpinelinux.org` 在国内解析与下载都不稳定。`apk add` 卡在这里，表现为流水线超时，失败点却不在代码上，排查成本高。
 - 换源只改 `/etc/apk/repositories` 这一个文本文件，不改变包的来源身份：包仍由 Alpine 官方构建并签名，镜像站只承担分发。
-- 收益是构建速度与稳定性，代价是信任面变大——这件事在 [SECURITY](../SECURITY.md) 里被列为已知取舍，最后一节展开。
+- 收益是构建速度与稳定性，代价是信任面变大——这件事在 [SECURITY](../../SECURITY.md) 里被列为已知取舍，最后一节展开。
 
 ## 仓库路径怎么推导
 
@@ -39,7 +39,7 @@ printf '%s\n' \
     >/etc/apk/repositories
 ```
 
-顺序的两层含义：先被尝试的源决定速度，版本相同时先列出的源决定取哪一份。调整顺序属于对外行为变更，[CONTRIBUTING](../CONTRIBUTING.md) 要求说明理由。
+顺序的两层含义：先被尝试的源决定速度，版本相同时先列出的源决定取哪一份。调整顺序属于对外行为变更，[CONTRIBUTING](../../CONTRIBUTING.md) 要求说明理由。
 
 容器里看实际生成的内容：
 
@@ -118,15 +118,15 @@ docker run --rm docker.cnb.cool/dtapp/alpine:latest sh -c 'apk update'
 ## 源挂掉时怎么改
 
 1. 先用上一节的 `curl` 循环区分「某个源挂了」和「整条网络不通」。
-2. 只动 `.cnb/docker/Dockerfile` 里 `printf` 那段对应的一行：调整顺序就是整行搬位置，弃用就是整行删掉；不要为了一个源改动 `printf` 的结构。
+2. 只动 `.cnb/docker/Dockerfile.alpine` 里 `printf` 那段对应的一行：调整顺序就是整行搬位置，弃用就是整行删掉；不要为了一个源改动 `printf` 的结构。
 3. 保持四行同构（只差主机名）。写成 `>` 和 `>>` 混用是旧写法，现在一次 `printf` 写完整个文件，不存在「某一行误写成 `>` 冲掉前面所有行」的可能——这条历史坑不值得保留第二次。
-4. 本地验证：`docker build -f .cnb/docker/Dockerfile -t alpine:local .`（默认跟随上游 `latest`；想固定基座再加 `--build-arg ALPINE_VERSION=3.25.1`），再在容器里跑一次 `apk update` 确认没有新的 `WARNING`。
+4. 本地验证：`docker build -f .cnb/docker/Dockerfile.alpine -t alpine:local .`（默认跟随上游 `latest`；想固定基座再加 `--build-arg ALPINE_VERSION=3.25.1`），再在容器里跑一次 `apk update` 确认没有新的 `WARNING`。
 5. 跑 `make format-docker` 让 `dockerfmt` 统一格式，提交时在 PR 里写明「哪个源、什么症状、什么时候观测到」。
 6. 不要因为某个国内站出问题就顺手删掉官方源：删掉等于把「几个镜像站同时故障」变成构建彻底失败。
 
 ## 供应链信任面
 
-- 信任面 = 上游 Alpine + 这四个分发站，已在 [SECURITY](../SECURITY.md) 的「已知取舍」里写明。
+- 信任面 = 上游 Alpine + 这四个分发站，已在 [SECURITY](../../SECURITY.md) 的「已知取舍」里写明。
 - 镜像站能做的：返回索引与包、拒绝服务、返回旧快照（构建拿到的是过期版本的包）。
 - 镜像站无法悄悄塞进一个恶意包：apk 用 `/etc/apk/keys/` 里的 Alpine 官方公钥校验仓库索引与每个 `.apk` 包的签名，签名不符直接拒绝安装。
 - 因此换源主要影响**可用性**与**时效性**，不影响包内容的真实性；剩下的风险是构建指纹（源站能看到你请求了哪些包与版本）和「被喂旧索引导致镜像停留在旧包上」。
@@ -142,7 +142,7 @@ docker run --rm docker.cnb.cool/dtapp/alpine:latest sh -c 'apk update'
 
 ## 相关文档
 
-- [文档索引](README.md)
+- [文档索引](index.md)
 - [Dockerfile 解析](dockerfile.md)
 - [安全基线](security-baseline.md)
 - [排错手册](troubleshooting.md)

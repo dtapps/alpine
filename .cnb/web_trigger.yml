@@ -1,8 +1,8 @@
 branch:
   - buttons:
-      - name: 打包 Docker 镜像（多架构 amd64 + arm64）
-        description: 构建并推送 amd64 / arm64 镜像与多架构 manifest list 到制品库
-        event: web_trigger_build_image # 触发的 CI 事件名
+      - name: 打包 Alpine 镜像（多架构 amd64 + arm64）
+        description: 构建并推送 Alpine 基础镜像的 amd64 / arm64 与多架构 manifest list 到制品库
+        event: web_trigger_build_alpine # 触发的 CI 事件名
         permissions:
           roles:
             - owner
@@ -11,6 +11,26 @@ branch:
         inputs:
           version:
             description: 选填。留空 = 跟随 Dockerfile 默认的 alpine:latest（每天取上游最新）；也可填 latest、3.25、3.25.1 或 3.25.1@sha256:<digest>
+            required: false
+            type: input
+            default: ''
+      - name: 打包 Chromium 镜像（多架构 amd64 + arm64）
+        description: 构建并推送 default / -cjk / -headless 三个变体到 <registry>/<仓库 slug>/chromium
+        event: web_trigger_build_chromium # 触发的 CI 事件名
+        permissions:
+          roles:
+            - owner
+            - master
+            - developer
+        inputs:
+          version:
+            description: 选填。留空 = latest；也可填 Alpine 版本 3.24 / 3.24.3（不是 Chromium 版本）
+            required: false
+            type: input
+            default: ''
+          expected_chromium_major:
+            description: 选填。Chromium 主版本断言：留空 = 用 Dockerfile 的 155；填 156 表示确认上游升级；填 any 跳过断言。注意不能指定安装某个旧版 Chromium（Alpine
+              仓库只保留当前版本）
             required: false
             type: input
             default: ''

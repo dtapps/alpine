@@ -26,7 +26,7 @@
 
 ### 脚本报 `version` 非法
 
-`build-image.sh` 先做白名单校验，再动任何 docker 命令：留空或 `latest` 表示跟随 `Dockerfile` 的 `ALPINE_VERSION`（默认 `latest`），其余只接受 `3.25`、`3.25.1`、`3.25.1@sha256:<64 位 hex>` 这三种形态。以下输入都会在校验阶段 `exit 1`：
+`build-alpine.sh` 先做白名单校验，再动任何 docker 命令：留空或 `latest` 表示跟随 `Dockerfile` 的 `ALPINE_VERSION`（默认 `latest`），其余只接受 `3.25`、`3.25.1`、`3.25.1@sha256:<64 位 hex>` 这三种形态。以下输入都会在校验阶段 `exit 1`：
 
 | 输入                                | 为什么被拒                                             |
 |-------------------------------------|--------------------------------------------------------|
@@ -70,7 +70,7 @@ docker buildx ls
 docker buildx inspect
 ```
 
-`build-image.sh` 在唯一一次构建之前会跑 `version` 与 `inspect` 两条自检（`ls` 留给人工排查）。若在受限容器里执行过 `docker buildx create --driver docker-container`，会因拉不起嵌套 buildkitd 而 bootstrap 失败：删掉该 builder，回到内置的实例，同时确认 workflow 里声明了 `services: docker`。
+`build-alpine.sh` 在唯一一次构建之前会跑 `version` 与 `inspect` 两条自检（`ls` 留给人工排查）。若在受限容器里执行过 `docker buildx create --driver docker-container`，会因拉不起嵌套 buildkitd 而 bootstrap 失败：删掉该 builder，回到内置的实例，同时确认 workflow 里声明了 `services: docker`。
 
 ## 推送与制品库
 
@@ -151,7 +151,7 @@ docker buildx imagetools inspect alpine:3.25.1@sha256:<64hex> --format '{{.Manif
 
 ```bash
 # 核对脚本真正写出的 key
-grep -n 'image_\|alpine_version\|base_image\|base_digest\|built_at\|source_date' .cnb/scripts/build-image.sh | tail -16
+grep -n 'image_\|alpine_version\|base_image\|base_digest\|built_at\|source_date' .cnb/scripts/build-alpine.sh | tail -16
 ```
 
 ### 体积显示 `unknown`
@@ -205,7 +205,7 @@ grep -n 'event:' .cnb/web_trigger.yml
 grep -rn 'web_trigger_' .cnb/workflows/ .cnb.yml
 ```
 
-当前可用的事件名是 `web_trigger_build_image` 与 `web_trigger_codewiki`。三处必须联动：workflow 里的触发键、`.cnb/web_trigger.yml` 的 `event`、`.cnb.yml` 的 `include` 列表。漏掉 `include` 时按钮存在但没人监听，表现为点下去没有任何构建记录。
+当前可用的事件名是 `web_trigger_build_alpine` 与 `web_trigger_codewiki`。三处必须联动：workflow 里的触发键、`.cnb/web_trigger.yml` 的 `event`、`.cnb.yml` 的 `include` 列表。漏掉 `include` 时按钮存在但没人监听，表现为点下去没有任何构建记录。
 
 ## PR 门禁
 
@@ -215,7 +215,7 @@ grep -rn 'web_trigger_' .cnb/workflows/ .cnb.yml
 
 ```bash
 # 本次改动是否碰了包的声明
-git diff --stat -- .cnb/docker/Dockerfile
+git diff --stat -- .cnb/docker/Dockerfile.alpine
 ```
 
 处置分三种：升级到已修复版本（换包或换基础 `version`）；确认是上游尚未修复的 CVE，那它不该在这个 PR 里解决，按 [安全基线](security-baseline.md) 的链条等上游；确认是误报后再动扫描配置。不要为了过门禁注释掉 `failOnSeverity`——push 侧的全量报告会失去对照基线。
