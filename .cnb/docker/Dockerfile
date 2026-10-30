@@ -1,61 +1,103 @@
 # ===================================================================
-# 定义构建参数 (ARG)
+# Alpine 基础镜像：体积小、构建快、可追溯
+#
+# 基座跟随上游 latest-stable（定时任务每天重建，自动带上新补丁/新小版本）；
+# 「具体是哪个版本」不写死在这里，而是由构建脚本解析后写进产物标签与 OCI label：
+#   alpine:latest  ──解析──>  3.25.1  ──打标签──>  3.25.1（每天重建会覆盖同名标签）
+# 需要复现某次构建时，用元数据里记录的 image_digest / base_digest，而不是 latest。
 # ===================================================================
-ARG ALPINE_VERSION=latest
 
-# 使用官方 Alpine 作为基础镜像（轻量、安全）
-# Alpine 特点：体积小（约5MB）、安全、适合容器化部署
+# -------------------------------------------------------------------
+# 基础镜像版本
+#   latest        默认：跟随上游最新稳定版（定时任务的用法）
+#   3.25          跟随该分支的补丁（同 tag 产出会漂）
+#   3.25.1        钉死某个 patch
+#   3.25.1@sha256:<digest>  位级复现（审计、事故复盘）
+# -------------------------------------------------------------------
+ARG ALPINE_VERSION=latest
 FROM alpine:${ALPINE_VERSION}
 
-# ===================================================================
-# STEP 1: 替换为自定义镜像源，加速软件包下载（国内用户必备）
-# 默认源 dl-cdn.alpinelinux.org 在国内访问较慢，替换为自定义镜像可大幅提升构建速度
-# ===================================================================
-RUN ALPINE_VER=$(cat /etc/alpine-release | cut -d'.' -f1,2) \
-    && echo "https://mirrors.cernet.edu.cn/alpine/v${ALPINE_VER}/main" >/etc/apk/repositories \
-    && echo "https://mirrors.cernet.edu.cn/alpine/v${ALPINE_VER}/community" >>/etc/apk/repositories \
-    && echo "https://mirrors.cloud.tencent.com/alpine/v${ALPINE_VER}/main" >>/etc/apk/repositories \
-    && echo "https://mirrors.cloud.tencent.com/alpine/v${ALPINE_VER}/community" >>/etc/apk/repositories \
-    && echo "https://mirrors.aliyun.com/alpine/v${ALPINE_VER}/main" >>/etc/apk/repositories \
-    && echo "https://mirrors.aliyun.com/alpine/v${ALPINE_VER}/community" >>/etc/apk/repositories \
-    && echo "https://mirrors.volces.com/alpine/v${ALPINE_VER}/main" >>/etc/apk/repositories \
-    && echo "https://mirrors.volces.com/alpine/v${ALPINE_VER}/community" >>/etc/apk/repositories \
-    && echo "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/main" >>/etc/apk/repositories \
-    && echo "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/community" >>/etc/apk/repositories \
-    && apk update --no-cache
+# FROM 之前声明的 ARG 在构建阶段不可见，必须在此重新声明才能用于 LABEL
+ARG ALPINE_VERSION
+ARG IMAGE_VERSION=dev
+ARG VCS_REF=unknown
+# 默认值取固定纪元时间而非当前时间：不传参时同一份源码构建出同样的镜像 config
+ARG BUILD_DATE=1970-01-01T00:00:00Z
+# 基础镜像的 manifest digest（CI 解析后传入）：钉住「这次的 alpine:latest 是哪一份」
+ARG BASE_DIGEST=unknown
 
-# ===================================================================
-# STEP 2: 安装运行时必需的基础组件（最小化依赖）
-# 仅安装最核心的包，确保镜像尽可能轻量
-# ===================================================================
-RUN apk add --no-cache \
-    ca-certificates \
-    curl \
-    netcat-openbsd \
-    bind-tools
+# -------------------------------------------------------------------
+# OCI 元数据标签
+#   source / url  → 本镜像所在的 CNB 仓库（不是 Docker Hub）
+#   base.*        → 基座是谁：FROM 用的那个 alpine 标签，以及它当次的 digest
+# 注意 base.name 按 OCI 规范指「基础镜像」，不是本镜像的存放位置。
+# -------------------------------------------------------------------
+LABEL org.opencontainers.image.source="https://cnb.cool/dtapp/alpine" \
+    org.opencontainers.image.url="https://cnb.cool/dtapp/alpine" \
+    org.opencontainers.image.revision="${VCS_REF}" \
+    org.opencontainers.image.created="${BUILD_DATE}" \
+    org.opencontainers.image.version="${IMAGE_VERSION}" \
+    org.opencontainers.image.description="Alpine 基础镜像：ca-certificates + curl + drill + nc + Asia/Shanghai 时区" \
+    org.opencontainers.image.licenses="MIT" \
+    org.opencontainers.image.base.name="alpine:${ALPINE_VERSION}" \
+    org.opencontainers.image.base.digest="${BASE_DIGEST}"
 
-# 注释：
-# - ca-certificates: 支持 HTTPS
-# - curl: 调试 HTTP/HTTPS 接口（如 OTLP）
-# - netcat-openbsd: 测试端口连通性（nc -zv host port）
-# - bind-tools: DNS 查询（nslookup, dig）
+# -------------------------------------------------------------------
+# 时区与本地化
+#   TZ 只对「读到该环境变量」的程序生效；musl 的 tzset() 仍依赖
+#   tzdata 提供的 /usr/share/zoneinfo，两者必须配套。
+#   musl 只支持 C.UTF-8，写 en_US.UTF-8 不会报错、只会静默不生效。
+# -------------------------------------------------------------------
+ENV TZ=Asia/Shanghai \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
 
-# ===================================================================
-# STEP 3: 设置中国上海时区（避免日志时间错乱、定时任务异常）
-# ln -sf：创建符号链接，将系统默认时钟指向上海时区
-# echo > /etc/timezone：写入时区标识（部分应用依赖此文件识别时区）
-# ===================================================================
-RUN apk add --no-cache tzdata \
-    && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
-    && echo "Asia/Shanghai" >/etc/timezone
+# -------------------------------------------------------------------
+# 有意以 root 运行：本镜像是「进容器就能 apk add / 改配置」的调试基座。
+# 生产镜像请自行降权：
+#   RUN adduser -D -u 10001 app
+#   USER app
+# 不设 WORKDIR：基础镜像设了会被所有下游继承，等于替别人决定工作目录。
+# -------------------------------------------------------------------
+USER root
 
+# -------------------------------------------------------------------
+# 单层完成：换源 → 装包 → 写时区 → 清缓存
+#   - 换源与装包必须同层：apk 用的是本层的 /etc/apk/repositories
+#   - apk add --no-cache 自带索引拉取，不需要 apk update（省一整轮索引下载）
+#   - 清理必须与安装同层：跨层 rm 只产生 whiteout，旧层数据照样随镜像分发
+#   - 包名按字母序，便于 diff 与评审
+#   - 只保留 main 源：本层所有包都在 main；community 索引约 2.4 MiB，默认白拉
+#   - 仓库路径由容器内 /etc/alpine-release 推导，基座升小版本时无需改这里
+# -------------------------------------------------------------------
+RUN set -eux; \
+    alpine_ver="$(cut -d. -f1,2 /etc/alpine-release)"; \
+    printf '%s\n' \
+        "https://mirrors.cernet.edu.cn/alpine/v${alpine_ver}/main" \
+        "https://mirrors.cloud.tencent.com/alpine/v${alpine_ver}/main" \
+        "https://mirrors.aliyun.com/alpine/v${alpine_ver}/main" \
+        "https://dl-cdn.alpinelinux.org/alpine/v${alpine_ver}/main" \
+        >/etc/apk/repositories; \
+    apk add --no-cache \
+        ca-certificates \
+        curl \
+        drill \
+        netcat-openbsd \
+        tzdata; \
+    ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime; \
+    echo "Asia/Shanghai" >/etc/timezone; \
+    rm -rf /var/cache/apk/* /tmp/* /var/tmp/* /root/.cache
+
+# -------------------------------------------------------------------
+# 包选择说明（体积为 v3.24 x86_64 实测安装体积 / 含依赖净增）
+#   ca-certificates  0.20 MiB / 0.20  HTTPS 校验基础，curl 与下游都依赖
+#   curl             0.27 MiB / 5.06  含 libunistring、brotli、zstd、libcurl 等传递依赖
+#   drill            0.06 MiB / 0.40  DNS 排查（dig 的轻量替代，省 6.6 MiB）
+#   netcat-openbsd   0.04 MiB / 0.16  端口探活 nc -zv（busybox 的 nc 不支持 -z）
+#   tzdata           0.43 MiB / 0.43  Asia/Shanghai 时区数据
+#
+# 需要真正的 dig 语法与输出：把 drill 换成 bind-tools（多 6.6 MiB，闭包 17 个包）
+# 只需要「能不能解析」：删掉 drill，用 busybox 自带的 nslookup（再省 0.4 MiB）
+# 需要 community 里的包：在 /etc/apk/repositories 追加
+#   https://mirrors.aliyun.com/alpine/v${alpine_ver}/community
 # ===================================================================
-# STEP 4: 清理所有临时文件与缓存（关键步骤！极大减少镜像体积）
-# Alpine 的 APK 缓存默认保存在 /var/cache/apk/，必须手动清理
-# 同时清除 /tmp 下可能残留的临时文件
-# ===================================================================
-RUN rm -rf \
-    /tmp/* \
-    /var/cache/apk/* \
-    /root/.cache \
-    /var/tmp/*

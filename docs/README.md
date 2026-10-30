@@ -23,11 +23,11 @@
 | [architecture.md](architecture.md)               | 仓库全貌、触发矩阵、文件职责、关键设计取舍                  | `.cnb.yml`、`.cnb/workflows/**`                 |
 | [getting-started.md](getting-started.md)         | 拉取、运行、容器内自检、作为基础镜像、按 digest 固定        | 制品库 + `Dockerfile`                           |
 | [dockerfile.md](dockerfile.md)                   | Dockerfile 逐段解析、加包标准、层与体积                     | `.cnb/docker/Dockerfile`                        |
-| [mirrors.md](mirrors.md)                         | APK 源顺序、版本号推导、源失效处置、供应链信任面            | `Dockerfile` STEP 1                             |
+| [mirrors.md](mirrors.md)                         | APK 源顺序、版本号推导、源失效处置、供应链信任面            | `Dockerfile` 里写源那段                         |
 | [build.md](build.md)                             | 本地与 CI 构建、buildx、多架构产物落地方式                  | `.cnb/scripts/build-image.sh`                   |
 | [ci-pipeline.md](ci-pipeline.md)                 | 事件矩阵、按钮与权限、imports、插件职责、改流水线步骤       | `.cnb.yml`、`.cnb/web_trigger.yml`、`workflows` |
 | [images-and-tags.md](images-and-tags.md)         | 镜像地址、标签契约、manifest list 与单平台镜像、digest 固定 | 制品库 + 构建脚本                               |
-| [metadata-and-badges.md](metadata-and-badges.md) | 元数据五键、写入链路、徽章、体积统计原理                    | `build-image.sh`、`cnbcool/annotations`         |
+| [metadata-and-badges.md](metadata-and-badges.md) | 元数据十键、写入链路、徽章、体积统计原理                    | `build-image.sh`、`cnbcool/annotations`         |
 | [security-baseline.md](security-baseline.md)     | 镜像攻击面、扫描能力、`.scanignore` 原则、凭证管理          | `.scanignore`、`.cnb/security/**`、`sca.yml`    |
 | [maintenance.md](maintenance.md)                 | 补丁节奏、版本升级、验证清单、周期性检查                    | `crontab`、`web_trigger_build_image`            |
 | [troubleshooting.md](troubleshooting.md)         | 症状到处置的总表与分主题排查                                | 全仓库                                          |

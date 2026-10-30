@@ -1,0 +1,16 @@
+# 构建上下文只需要 .cnb/docker/Dockerfile（由 -f 指定），其余全部是传输噪声。
+# 当前仓库 3.0 MB，其中 .git 占 1.8 MB：不忽略的话每次构建都要上传一遍。
+
+.git
+.gitignore
+
+# 文档与仓库元数据
+*.md
+docs
+LICENSE
+Makefile
+
+# 工具配置与 CI 生成物
+.yamlfmt
+.scanignore
+.cnb/annotation.json

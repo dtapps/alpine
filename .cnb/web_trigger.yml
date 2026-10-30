@@ -10,10 +10,10 @@ branch:
             - developer
         inputs:
           version:
-            description: 请输入版本
+            description: 选填。留空 = 跟随 Dockerfile 默认的 alpine:latest（每天取上游最新）；也可填 latest、3.25、3.25.1 或 3.25.1@sha256:<digest>
             required: false
             type: input
-            default: latest
+            default: ''
       - name: 生成 Code Wiki
         description: 重新分析仓库并生成 Code Wiki 文档（本仓库不发版，故提供手动入口）
         event: web_trigger_codewiki # 触发的 CI 事件名
