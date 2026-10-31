@@ -86,7 +86,8 @@ fi
 
 # ---------- 1.5 可选的 Chromium 主版本断言覆盖 ----------
 # 按钮输入 expected_chromium_major：留空 = 用 Dockerfile 里的 EXPECTED_CHROMIUM_MAJOR；
-# 填 155/156 = 显式确认这次构建的浏览器主版本；填 any = 跳过断言。
+# 留空 = 不校验，跟随上游；填 155/156 = 显式确认这次构建的浏览器主版本；
+# 填 any = 跳过断言。
 # 注意它不是「装指定版本的 Chromium」：chromium 包由 Alpine 分支仓库决定，
 # 仓库里只保留当前版本的 apk，指定旧版本会直接装不上。
 set +u
@@ -100,9 +101,9 @@ if [ -n "${expected_chromium_major}" ]; then
     *) die "expected_chromium_major 只接受主版本号（如 155）或 any，收到：${expected_chromium_major}" ;;
   esac
   EXPECTED_ARG="--build-arg EXPECTED_CHROMIUM_MAJOR=${expected_chromium_major}"
-  info "断言      chromium 主版本 = ${expected_chromium_major}（覆盖 Dockerfile 默认值）"
+  info "断言      chromium 主版本 = ${expected_chromium_major}（显式校验）"
 else
-  info "断言      chromium 主版本 = Dockerfile 默认值（155）"
+  info "断言      chromium 主版本 = 不校验（跟随上游）"
 fi
 
 # ---------- 2. 登录与构建元数据 ----------
@@ -142,14 +143,14 @@ fi
 # CACHE_BUST 只影响装包层，改 Dockerfile 其它部分不会连带重装 chromium。
 #
 # 注意：ALPINE_VERSION 始终显式传入。cron 不传 version 时落到 latest，
-# 与 Dockerfile 里「钉住 3.24.3」的默认值不同——这是刻意保留的既有行为
-# （见 docs/chromium/images-and-tags.md），PR 校验不传参数才验 Dockerfile 默认值。
+# 与 Dockerfile 默认值一致；PR 校验也不传参数，验证的就是默认值。
 # shellcheck disable=SC2086 # ATTEST_ARGS / EXPECTED_ARG 需要按空格拆成多个参数
 COMMON_ARGS="--pull ${ATTEST_ARGS} ${EXPECTED_ARG} \
   --build-arg ALPINE_VERSION=${version} \
   --build-arg BUILD_DATE=${BUILD_DATE} \
   --build-arg BUILD_REVISION=${BUILD_REVISION} \
-  --build-arg CACHE_BUST=${CACHE_BUST}"
+  --build-arg CACHE_BUST=${CACHE_BUST} \
+  --build-arg IMAGE_SOURCE=${CNB_REPO_URL_HTTPS}"
 
 # ---------- 4. 标签与变体构建 ----------
 tags_for() { # $1=变体后缀 → 输出 -t 参数串

@@ -29,7 +29,7 @@ RUN ALPINE_VER=$(cut -d. -f1,2 /etc/alpine-release) \
 ```
 
 - `/etc/alpine-release` 的内容形如 `3.24.3`（major.minor.patch），而 APK 仓库路径只到 `major.minor`，即 `v3.24`，所以取前两段再拼 `v`。
-- 在容器内读文件推导，而不是从 `ARG ALPINE_VERSION` 截取：那个 ARG 的默认值虽然已经钉成 `3.24.3`，但它仍然接受 `latest`（见[CI 流水线](ci-pipeline.md)的入参校验），而 `latest` 拼不出一条有效的仓库 URL。
+- 在容器内读文件推导，而不是从 `ARG ALPINE_VERSION` 截取：那个 ARG 默认是 `latest`、也可接受具体版本号（见[CI 流水线](ci-pipeline.md)的入参校验），而 `latest` 拼不出一条有效的仓库 URL。
 - 在容器内读还能自动对齐：哪天把默认值改成 `3.25.x`，仓库路径自动变成 `v3.25`，这段一行都不用改。
 - 前提是 `FROM` 用的是真实存在的标签；`version` 传了不存在的版本会先在 `FROM` 阶段失败，不会走到这里。
 

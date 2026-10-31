@@ -1,0 +1,59 @@
+# ===================================================================
+# 变体镜像：无头默认参数版（可选）
+#
+# 基础镜像刻意不内置任何启动参数（见 CONTRIBUTING.md 硬性规则）。如果你
+# 自用、每次都懒得拼命令行，就用这个变体：它在基础镜像之上只做三件事
+#
+#   1. 用 CHROMIUM_USER_FLAGS 注入一套固定默认参数
+#      （Alpine 的 /usr/lib/chromium/chromium-launcher.sh 会把它接在
+#        /etc/chromium/*.conf 的系统默认值之后，Puppeteer 也吃得到）
+#   2. 用 tini 当 PID 1，回收 zygote / renderer 的僵尸进程并转发信号
+#   3. 什么都不删，产物与基础镜像共用同一批层
+#
+# 这是 .cnb/docker/Dockerfile.headless 的 GitHub 侧副本：两个平台有意各留一份，
+# 不互相引用；改默认参数时两处都要改。
+# 构建（由 .github/scripts/build-chromium.sh 自动完成，本地等价命令）：
+#   docker build -f .github/docker/Dockerfile.headless \
+#     --build-arg BASE_IMAGE=alpine-chromium:local -t alpine-chromium:local-headless .
+# ===================================================================
+# 默认值只用于本地手动构建；CI 用同批次 default 镜像的 digest 覆盖（build-chromium.sh
+# 显式传 --build-arg BASE_IMAGE=${IMAGE}@${BASE_DIGEST}）。本地构建需自行传
+# --build-arg IMAGE_SOURCE 与 BASE_IMAGE。
+ARG IMAGE_SOURCE=https://github.com/dtapps/alpine
+ARG BASE_IMAGE=${IMAGE_SOURCE}/chromium:latest
+FROM ${BASE_IMAGE}
+
+ARG BUILD_DATE=unknown
+ARG BUILD_REVISION=unknown
+
+# -------------------------------------------------------------------
+# 默认无头启动参数
+#   --headless      Chromium 132 起等价于新版无头（旧版无头已拆成独立的
+#                   chrome-headless-shell），不需要再写 --headless=new
+#   --no-sandbox    root 下不带它直接报
+#                   "Running as root without --no-sandbox is not supported"
+#   --disable-dev-shm-usage  容器默认 /dev/shm 只有 64MB，不带必崩
+#   --user-data-dir  包装脚本在 root + root 属主 HOME 时会强塞一个
+#                    $HOME/.config/chromium，并发实例会撞 SingletonLock，
+#                    这里显式指到 /tmp 下一个独立目录名，调用方可再覆盖
+#   --font-render-hinting=none / --force-color-profile=srgb
+#                   让截图的字形度量与颜色在不同宿主上可复现
+# 想关掉这些默认值：docker run -e CHROMIUM_USER_FLAGS="" 即可。
+# -------------------------------------------------------------------
+ENV CHROMIUM_USER_FLAGS="--headless --no-sandbox --disable-dev-shm-usage --hide-scrollbars --font-render-hinting=none --force-color-profile=srgb --user-data-dir=/tmp/chromium-headless"
+
+# PID 1 用 tini：Chromium 会 fork zygote 与 renderer，PID 1 不回收孤儿进程，
+# 长时间跑的自动化容器会累积僵尸；tini 同时负责把 SIGTERM 转发下去。
+ENTRYPOINT ["/sbin/tini", "--"]
+
+# 不带参数时只打印版本（等价于一次冒烟测试），不依赖网络
+CMD ["chromium", "--version"]
+
+# ===================================================================
+# OCI 元数据：覆盖 created / revision，其余标签从基础镜像继承
+# ===================================================================
+LABEL org.opencontainers.image.title="alpine-chromium" \
+    org.opencontainers.image.description="Alpine + Chromium (headless defaults + tini) for screenshot / crawling / automation" \
+    org.opencontainers.image.revision="${BUILD_REVISION}" \
+    org.opencontainers.image.created="${BUILD_DATE}" \
+    dev.alpine-chromium.variant="headless"

@@ -14,7 +14,11 @@
 #   docker build -f .cnb/docker/Dockerfile.headless \
 #     --build-arg BASE_IMAGE=alpine-chromium:local -t alpine-chromium:local-headless .
 # ===================================================================
-ARG BASE_IMAGE=docker.cnb.cool/dtapp/alpine/chromium:latest
+# 本镜像所在 CNB 仓库的 Web 地址（仅用于拼出 BASE_IMAGE 的本地构建默认值）。
+# CI 由 build-chromium.sh 显式传 --build-arg BASE_IMAGE=${IMAGE}@${BASE_DIGEST}；
+# 不设默认值，本地 docker build 时需自行 --build-arg IMAGE_SOURCE 与 BASE_IMAGE。
+ARG IMAGE_SOURCE=https://cnb.cool/dtapp/alpine
+ARG BASE_IMAGE=${IMAGE_SOURCE}/chromium:latest
 FROM ${BASE_IMAGE}
 
 ARG BUILD_DATE=unknown

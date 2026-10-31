@@ -174,7 +174,7 @@ docker run --rm alpine-chromium:pr date +%Z | grep -q 'CST'
 
 它是**门禁**：改坏 Dockerfile（包名写错、源路径拼错、时区文件挪了位置）以前只能等次日 `01:30` 的定时任务变红才发现，中间那段时间 `latest` 一直是上一版；现在 PR 上就能红，而且不推送、不碰制品库，失败成本只剩一次 amd64 构建。
 
-两处细节容易漏：那条构建命令里 `ALPINE_VERSION` 写死 `3.24.3`（与 Dockerfile 默认值一致），不读按钮上的 `version`，也不 `import` 组织环境与构建脚本——它要能在一个没有推送凭证的 PR 环境里独立跑完。它也不验证 `-cjk` / `-headless` 变体与多架构，绿了只代表「这份 Dockerfile 装得完、浏览器起得来、时区对」。
+两处细节容易漏：那条构建命令里 `ALPINE_VERSION` 用 Dockerfile 默认值 `latest`，不读按钮上的 `version`，也不 `import` 组织环境与构建脚本——它要能在一个没有推送凭证的 PR 环境里独立跑完。它也不验证 `-cjk` / `-headless` 变体与多架构，绿了只代表「这份 Dockerfile 装得完、浏览器起得来、时区对」。
 
 ## imports 与 source
 
@@ -284,6 +284,8 @@ commit 元数据    https://cnb.cool/dtapp/alpine/-/badge/annotation/commit/late
 
 ## 相关文档
 
+- [CNB 平台层说明](../cnb.md)（内置变量与地址来源、按钮/imports/元数据总览）
+- [GitHub Actions 与 GHCR](../github.md)（另一个平台的两份副本）
 - [仓库架构](architecture.md)
 - [镜像与标签](images-and-tags.md)
 - [构建与本地复现](build.md)

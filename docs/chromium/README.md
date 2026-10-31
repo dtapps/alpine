@@ -8,7 +8,7 @@
 
 ## 镜像里有什么
 
-- 基础镜像：`alpine:3.24.3`（`ALPINE_VERSION` 默认钉死**具体补丁版本**，不再用 `latest`）
+- 基础镜像：`alpine:latest`（`ALPINE_VERSION` 默认跟随上游最新稳定版，可钉具体补丁版本）
 - APK 源替换为国内镜像，cernet → 官方依次回退，国内拉包不必直连 `dl-cdn.alpinelinux.org`
 - 浏览器主程序：`chromium`（Alpine 官方包，二进制位于 `/usr/bin/chromium`）
 - Chromium 运行所需图形/渲染依赖：`glib`、`pango`、`gdk-pixbuf`、`gtk+3.0`、`nss`、`freetype`、`harfbuzz`、`libstdc++`、`fontconfig` —— 这些由 `chromium` 的 `so:` 依赖**自动带入**，不需要显式声明；显式写出来不增体积、删掉也不减体积
@@ -34,7 +34,7 @@ Dockerfile 位于 `.cnb/docker/Dockerfile.chromium`，`-headless` 变体位于 `
 | 3.23     | `149.0.7827.53`     | 2026-06                                | 2027-11                                     |
 | **3.24** | **`155.0.8059.84`** | 2026-10                                | 2028-06（当前唯一 main + community 双支持） |
 
-要浏览器 CVE 修得掉，基础分支就得跟着走；这也是 `ALPINE_VERSION` 默认钉在 `3.24.3` 而不是 `latest` 的原因。
+要浏览器 CVE 修得掉，基础分支就得跟着走；定时任务每天传 `version=latest`，镜像跟着上游 Alpine 分支走，分支内冻住的 chromium 版本也随之更新到当前分支的最新。
 
 ## 变体与标签
 
@@ -279,7 +279,7 @@ USER chrome
 ## 本地构建
 
 ```bash
-# 单架构，构建完留在本地（基础版本默认钉 3.24.3）
+# 单架构，构建完留在本地（基础版本默认 latest，跟随上游）
 docker build -f .cnb/docker/Dockerfile.chromium --build-arg ALPINE_VERSION=3.24.3 -t alpine-chromium:local .
 
 # 变体：中文字体

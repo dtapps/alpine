@@ -29,8 +29,7 @@ branch:
             type: input
             default: ''
           expected_chromium_major:
-            description: 选填。Chromium 主版本断言：留空 = 用 Dockerfile 的 155；填 156 表示确认上游升级；填 any 跳过断言。注意不能指定安装某个旧版 Chromium（Alpine
-              仓库只保留当前版本）
+            description: 选填。Chromium 主版本断言：留空 = 不校验，跟随上游最新；填 156 表示确认上游升级；填 any 跳过断言。注意不能指定安装某个旧版 Chromium（Alpine 仓库只保留当前版本）
             required: false
             type: input
             default: ''

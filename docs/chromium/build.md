@@ -8,7 +8,7 @@
 docker build -f .cnb/docker/Dockerfile.chromium -t alpine-chromium:local .
 ```
 
-不传 `--build-arg` 时用 Dockerfile 的默认值 `ALPINE_VERSION=3.24.3`（**具体补丁版本，不是 `latest`**）。构建期已经替你做了一次 `chromium --version`：结果写进镜像内 `/usr/share/alpine-chromium/VERSION`，并与 `EXPECTED_CHROMIUM_MAJOR` 比对，对不上就构建失败。所以「构建成功」本身已经证明浏览器装上了。
+不传 `--build-arg` 时用 Dockerfile 的默认值 `ALPINE_VERSION=latest`（跟随上游，也可钉具体补丁版本）。构建期已经替你做了一次 `chromium --version`：结果写进镜像内 `/usr/share/alpine-chromium/VERSION`，并与 `EXPECTED_CHROMIUM_MAJOR` 比对，对不上就构建失败。所以「构建成功」本身已经证明浏览器装上了。
 
 再验一次它真的能跑起来渲染：
 

@@ -219,6 +219,8 @@ commit 元数据    https://cnb.cool/dtapp/alpine/-/badge/annotation/commit/late
 
 ## 相关文档
 
+- [CNB 平台层说明](../cnb.md)（内置变量与地址来源、按钮/imports/元数据总览）
+- [GitHub Actions 与 GHCR](../github.md)（另一个平台的两份副本）
 - [仓库架构](architecture.md)
 - [镜像与标签](images-and-tags.md)
 - [构建元数据与徽章](metadata-and-badges.md)

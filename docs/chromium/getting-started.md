@@ -7,7 +7,7 @@
 | 项目     | 值                                                                                                                                             |
 |----------|------------------------------------------------------------------------------------------------------------------------------------------------|
 | 镜像地址 | `docker.cnb.cool/dtapp/alpine/chromium`                                                                                                        |
-| 基础     | 官方 `alpine:3.24.3`（`ALPINE_VERSION` 默认值已钉到补丁版本，不再是 `latest`）                                                                 |
+| 基础     | 官方 `alpine:latest`（`ALPINE_VERSION` 默认跟随上游，可钉具体补丁版本）                                                                        |
 | 平台     | linux/amd64、linux/arm64（多架构 manifest list + 单平台标签并存）                                                                              |
 | 变体     | 默认（中性基座）、`-cjk`（带中文字体）、`-headless`（内置无头参数 + tini），命名规则见[镜像与标签](images-and-tags.md)                         |
 | 浏览器   | `chromium`，二进制在 `/usr/bin/chromium`；3.24 上是 `155.0.8059.84-r0`，精确版本读 `/usr/share/alpine-chromium/VERSION`                        |

@@ -236,6 +236,7 @@ docker buildx build \
   --build-arg "VCS_REF=${VCS_REF}" \
   --build-arg "BUILD_DATE=${BUILD_DATE}" \
   --build-arg "BASE_DIGEST=${BASE_DIGEST}" \
+  --build-arg "IMAGE_SOURCE=${CNB_REPO_URL_HTTPS}" \
   --provenance=mode=min \
   --sbom=false \
   -f "$DOCKERFILE" \

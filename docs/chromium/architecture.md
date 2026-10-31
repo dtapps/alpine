@@ -41,7 +41,7 @@
 | 构建层 | 决定「构建出什么」：基础版本、源、包、标签、元数据 | 何时触发、权限、按钮展示 |
 | 产物层 | 存储与分发镜像与元数据                             | 内容正确性、漏洞修复     |
 
-这种切分让改一处只影响一处：换 Alpine 版本改 `version` 输入或 Dockerfile 的 `ALPINE_VERSION` ARG 默认值（默认已钉在 `3.24.3`；注意这里是 Alpine 版本，不是 Chromium 版本），不改流水线；加一条扫描流水线不改构建脚本。
+这种切分让改一处只影响一处：换 Alpine 版本改 `version` 输入或 Dockerfile 的 `ALPINE_VERSION` ARG 默认值（默认 `latest`，跟随上游；注意这里是 Alpine 版本，不是 Chromium 版本），不改流水线；加一条扫描流水线不改构建脚本。
 
 构建层产出的镜像内容由 Dockerfile 这几步决定：换源（`main` + `community` 各留镜像站与官方两组 URL）→ 一次 `apk add` 显式装 6 个包（`chromium`、`ca-certificates`、`font-freefont`、`fontconfig`、`tzdata`、`tini`）→ 时区（`/etc/localtime` + `/etc/timezone`）→ 字体缓存（`fc-cache -f`）→ 清理。只写 6 个是因为 `chromium` 的 `so:` 依赖会把 `glib`、`pango`、`gdk-pixbuf`、`gtk+3.0`、`nss`、`freetype`、`harfbuzz`、`libstdc++`、`fontconfig` 这 9 个自动带进来——它们不是「被删掉的依赖」，显式写出来不增体积、删掉也不减体积。闭包实测口径（Alpine 3.24）：**184 个包 / 761 MiB installed / 约 303 MiB 下载**。包清单与取舍见 [Dockerfile 解析](dockerfile.md)。
 
@@ -109,7 +109,7 @@ Dockerfile 放在 `.cnb/docker/` 而不是根目录，是为了让 `.cnb/` 自�
 
 ### 基础版本为什么必须钉分支
 
-`ALPINE_VERSION` 的默认值是钉死的补丁版本 `3.24.3`（`FROM alpine:${ALPINE_VERSION}`），不再是 `latest`。原因是 `chromium` 在 **community** 仓库，而 Alpine 的 community 只维护到「下一个 stable 发布」，之后每个分支里的 chromium 就冻住了：
+`ALPINE_VERSION` 的默认值是 `latest`（`FROM alpine:${ALPINE_VERSION}`），跟随上游最新稳定版；也可钉具体补丁版本（如 `3.24.3`）做复现。需要知道的是 `chromium` 在 **community** 仓库，而 Alpine 的 community 只维护到「下一个 stable 发布」，之后每个分支里的 chromium 就冻住了：
 
 | 分支 | chromium | 最后更新 | 分支支持到                              |
 |------|----------|----------|-----------------------------------------|

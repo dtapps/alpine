@@ -2,6 +2,17 @@
 
 > 镜像地址 `docker.cnb.cool/dtapp/alpine`，标签是一份对外契约：一次构建产出哪些名字、每个名字什么时候出现、下游该固定到标签还是 digest，都在这里。
 
+## 两个平台：CNB 与 GHCR
+
+同一套标签规则同时发布到两个 registry，两条流水线各自独立推送、互不引用：
+
+| 平台   | 镜像地址                       | 流水线                               |
+|--------|--------------------------------|--------------------------------------|
+| CNB    | `docker.cnb.cool/dtapp/alpine` | `.cnb.yml` + `.cnb/workflows/`       |
+| GitHub | `ghcr.io/dtapps/alpine`        | `.github/workflows/build-alpine.yml` |
+
+标签名、提升顺序、冒烟断言完全一致，但两边是两份副本（`.cnb/scripts/build-alpine.sh` 与 `.github/scripts/build-alpine.sh`，Dockerfile 同理）：平台胶水各自维护，改标签规则时两份都要改。digest 不同——各 registry 各自构建、各自解析基座，不要跨平台比对。GitHub 侧的目录、触发方式与变量契约见 [GitHub Actions 与 GHCR](../github.md)。
+
 ## 标签表
 
 **标签就是 alpine 的版本号，不带日期。** 一次构建产出一个可推的标签，其余名字都是对它的引用改写：

@@ -25,6 +25,10 @@ ARG VCS_REF=unknown
 ARG BUILD_DATE=1970-01-01T00:00:00Z
 # 基础镜像的 manifest digest（CI 解析后传入）：钉住「这次的 alpine:latest 是哪一份」
 ARG BASE_DIGEST=unknown
+# 本镜像所在 CNB 仓库的 Web 地址（OCI source/url 标签用）。
+# 构建脚本用 CNB 内置变量 ${CNB_REPO_URL_HTTPS} 传入（fork 时自动指向自己的
+# 仓库）；不设默认值，本地 docker build 时需自行 --build-arg。
+ARG IMAGE_SOURCE
 
 # -------------------------------------------------------------------
 # OCI 元数据标签
@@ -32,8 +36,8 @@ ARG BASE_DIGEST=unknown
 #   base.*        → 基座是谁：FROM 用的那个 alpine 标签，以及它当次的 digest
 # 注意 base.name 按 OCI 规范指「基础镜像」，不是本镜像的存放位置。
 # -------------------------------------------------------------------
-LABEL org.opencontainers.image.source="https://cnb.cool/dtapp/alpine" \
-    org.opencontainers.image.url="https://cnb.cool/dtapp/alpine" \
+LABEL org.opencontainers.image.source="${IMAGE_SOURCE}" \
+    org.opencontainers.image.url="${IMAGE_SOURCE}" \
     org.opencontainers.image.revision="${VCS_REF}" \
     org.opencontainers.image.created="${BUILD_DATE}" \
     org.opencontainers.image.version="${IMAGE_VERSION}" \

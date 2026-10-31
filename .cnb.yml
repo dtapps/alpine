@@ -52,11 +52,11 @@ main:
   # chromium 三变体多架构一次构建要重得多，两条一起跑只会抢 runner 和制品库带宽。
   #
   # 定时任务没有按钮输入，所以两个输入都不传，等价于：
-  #   version=latest                 → 基座跟上游 alpine:latest（当前是 3.24 分支）
-  #   expected_chromium_major=空      → 用 Dockerfile 里的断言值 155
-  # 上游在分支内换 Chromium 主版本时，装包层的 EXPECTED_CHROMIUM_MAJOR 断言会让构建
-  # 显式失败（定时任务某天变红通常就是这个原因）；确认渲染无回归后，要么更新 Dockerfile
-  # 默认值，要么手动点按钮并填 expected_chromium_major=<新主版本> 或 any。
+  #   version=latest                 → 基座跟上游 alpine:latest（默认即 latest）
+  #   expected_chromium_major=空      → 不校验，跟随上游最新 Chromium 主版本
+  # 上游在分支内换 Chromium 主版本时构建正常跟随、不会失败；只有手动填了
+  # expected_chromium_major=<旧主版本> 做显式校验时，上游升级才会让构建红——
+  # 这时改填新版本号或 any 即可。
   'crontab: 30 1 * * *':
     - name: build-chromium
       runner:

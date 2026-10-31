@@ -5,7 +5,7 @@
 ## 结构总览
 
 ```text
-ARG ALPINE_VERSION=3.24.3        → 构建参数：Alpine 补丁版本（不是 Chromium 版本）
+ARG ALPINE_VERSION=latest        → 构建参数：Alpine 版本（不是 Chromium 版本），默认跟随上游
 FROM alpine:${ALPINE_VERSION}    → 官方 Alpine
 RUN  换源                          → 第 1 层：改写 /etc/apk/repositories
 RUN  装包 + 时区 + 字体缓存 + 版本断言 + 同层清理 → 第 2 层：体积全在这里
@@ -20,15 +20,15 @@ LABEL …                           → OCI 元数据：不占层体积
 
 镜像会到「数百 MB」量级，这是 Chromium 的依赖闭包带来的：Alpine 3.24 上 `apk add chromium` 实测 **184 个包 / 761 MiB installed**。具体数字看 commit 元数据里的 `chromium_image_size`（见 [构建元数据](metadata-and-badges.md)）。
 
-## ARG ALPINE_VERSION：为什么必须钉
+## ARG ALPINE_VERSION：默认跟随上游，可钉具体版本
 
 ```dockerfile
-ARG ALPINE_VERSION=3.24.3
+ARG ALPINE_VERSION=latest
 FROM alpine:${ALPINE_VERSION}
 ```
 
 - 声明在 `FROM` **之前**才能被 `FROM` 引用；写在后面就只能给 `RUN` 用。
-- 默认值从 `latest` 改成了具体补丁版本。`latest` 每天都在动，同一个 commit 今天和明天构建出的镜像内容不同，出问题无法回溯。
+- 默认 `latest`，跟随上游最新稳定版；定时任务每天重建自动吃到新补丁。需要复现某次构建时，显式钉具体补丁版本（如 `--build-arg ALPINE_VERSION=3.24.3`）。
 - 这个参数是 **Alpine 版本**，不是 Chromium 版本。Chromium 装哪个由该分支的软件包仓库决定。
 
 关键机制：`chromium` 在 **community** 仓库，而 Alpine 的 community 只维护到「下一个 stable 发布」。所以每个分支的 Chromium 会**冻住**：

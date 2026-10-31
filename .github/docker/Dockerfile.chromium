@@ -1,0 +1,175 @@
+# ===================================================================
+# Chromium 无头浏览器镜像（GitHub 平台）
+#
+#   本文件        → ghcr.io/dtapps/alpine/chromium:latest[-cjk|-headless]
+#   Dockerfile    → ghcr.io/dtapps/alpine:latest（Alpine 基础镜像，两者互不依赖）
+#
+# 这是 .cnb/docker/Dockerfile.chromium 的 GitHub 侧副本：两个平台有意各留一份，
+# 不互相引用。改镜像内容（装包、字体、时区）时两处都要改。
+# 由 .github/scripts/build-chromium.sh 驱动，流水线定义见 .github/workflows/build-chromium.yml。
+# ===================================================================
+
+# ===================================================================
+# 构建参数 (ARG)
+#   ALPINE_VERSION 基础镜像版本。默认 latest = 跟随上游最新稳定版，每天重建
+#   自动吃到新补丁/新小版本；也可钉具体版本（如 3.24.3）做复现或审计。
+#   注意 chromium 在 community 仓库，每个分支的 chromium 会随 Alpine 分支
+#   「冻住」（3.20/3.21/3.22 分别停在 chromium 131/136/142），换分支才会
+#   换浏览器主版本。
+# ===================================================================
+ARG ALPINE_VERSION=latest
+
+# 使用官方 Alpine 作为基础镜像（轻量、安全）
+# Alpine 特点：体积小（约5MB）、安全、适合容器化部署
+FROM alpine:${ALPINE_VERSION}
+
+# -------------------------------------------------------------------
+# 构建期参数
+#   WITH_*：变体开关，默认全关，主镜像保持最小
+#   EXPECTED_CHROMIUM_MAJOR：期望的 Chromium 主版本。默认空 = 不校验，跟随
+#     上游（每天重建自动吃到新版本）；填具体主版本号才断言，避免「镜像内容
+#     变了但没人发现」；构建非默认 Alpine 分支时按实际版本填。
+#   CACHE_BUST：装包层的缓存击穿点。CI 每天传新值，保证上游补丁进得来；
+#     不传也不影响正确性（只是失去跨轮次缓存复用）。
+#   BUILD_DATE / BUILD_REVISION：写进 OCI 标签，由 CI 传入。
+# -------------------------------------------------------------------
+ARG WITH_CJK=0
+ARG WITH_CHROMEDRIVER=0
+ARG WITH_SWIFTSHADER=0
+ARG EXPECTED_CHROMIUM_MAJOR=
+ARG CACHE_BUST=0
+ARG BUILD_DATE=unknown
+ARG BUILD_REVISION=unknown
+# 本镜像所在的代码仓库（OCI source/url）。构建脚本用 GITHUB_REPOSITORY 派生并
+# 传入；不设默认值，本地 docker build 时需自行 --build-arg。
+ARG IMAGE_SOURCE
+
+# ===================================================================
+# STEP 1: 替换为自定义镜像源，加速软件包下载（国内用户必备）
+# 只保留「国内镜像 + 官方兜底」两组：原先十行（五个镜像站）会让 apk 在不同
+# 同步进度的仓库之间混用，容易撞上依赖版本冲突，也让每次索引解析多打好几次
+# 网络请求。apk add 自带索引拉取，不需要单独的 apk update 层。
+# ===================================================================
+RUN ALPINE_VER=$(cut -d. -f1,2 /etc/alpine-release) \
+    && printf '%s\n' \
+        "https://mirrors.cernet.edu.cn/alpine/v${ALPINE_VER}/main" \
+        "https://mirrors.cernet.edu.cn/alpine/v${ALPINE_VER}/community" \
+        "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/main" \
+        "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/community" \
+        >/etc/apk/repositories
+
+# ===================================================================
+# STEP 2: 运行时依赖 + 时区 + 字体缓存（一层装完，同层清理）
+#
+# 为什么只显式要 6 个包：
+#   chromium 的 so: 依赖会把 glib / pango / gdk-pixbuf / gtk+3.0 / nss /
+#   freetype / harfbuzz / libstdc++ / fontconfig 全部自动拉进来（实测
+#   Alpine 3.24 上 `apk add chromium` 的闭包是 184 个包 / 761MiB installed），
+#   显式写出来不增体积、删掉也不减体积，所以只留「闭包里没有的」那几个。
+#   ca-certificates / font-freefont / tzdata / tini 都不在该闭包里。
+#
+# 关于体积：体积全在装包层，且几乎无可剥离内容——locale 是独立的
+#   chromium-lang（49.5MiB，默认不装），文档是 chromium-doc（2KB），
+#   调试符号是 chromium-dbg（277MiB，不装）。最大的一块 llvm22-libs
+#   （182MiB）由 chromium → pipewire-libs → libcamera → mesa-gles → mesa
+#   这条 so: 链带进来，删了浏览器就起不来。所以本层的清理只是兜底，
+#   不是体积手段。
+#
+# 关于 font-freefont：它不含任何 CJK 字形（实测 12 个 otf 的 cmap 里
+#   汉字/假名/谚文码位为 0），中文渲染必须装 font-noto-cjk（WITH_CJK=1）。
+# ===================================================================
+RUN echo "cache-bust: ${CACHE_BUST}" \
+    && apk add --no-cache \
+      chromium \
+      ca-certificates \
+      font-freefont \
+      fontconfig \
+      tzdata \
+      tini \
+    && if [ "$WITH_CJK" = "1" ]; then \
+         apk add --no-cache font-noto-cjk; \
+       fi \
+    && if [ "$WITH_CHROMEDRIVER" = "1" ]; then \
+         apk add --no-cache chromium-chromedriver; \
+       fi \
+    && if [ "$WITH_SWIFTSHADER" = "1" ]; then \
+         apk add --no-cache chromium-swiftshader; \
+       fi \
+    && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+    && echo "Asia/Shanghai" >/etc/timezone \
+    && fc-cache -f \
+    && mkdir -p /usr/share/alpine-chromium \
+    && chromium --version >/usr/share/alpine-chromium/VERSION \
+    && cat /usr/share/alpine-chromium/VERSION \
+    && if [ -n "$EXPECTED_CHROMIUM_MAJOR" ] && [ "$EXPECTED_CHROMIUM_MAJOR" != "any" ]; then \
+         case "$(awk '{print $2}' /usr/share/alpine-chromium/VERSION)" in \
+           "${EXPECTED_CHROMIUM_MAJOR}".*) ;; \
+           *) \
+             echo "❌ chromium 主版本与 EXPECTED_CHROMIUM_MAJOR=${EXPECTED_CHROMIUM_MAJOR} 不符" >&2; \
+             echo "   实际: $(cat /usr/share/alpine-chromium/VERSION)" >&2; \
+             echo "   确认渲染冒烟通过后改传 --build-arg EXPECTED_CHROMIUM_MAJOR=<新版本>，或留空/传 any 跳过" >&2; \
+             exit 1 \
+             ;; \
+         esac; \
+       fi \
+    && rm -rf /var/cache/apk/* /tmp/* /var/tmp/* /root/.cache /root/.config/chromium
+
+# ===================================================================
+# STEP 3: 时区与本地化环境变量
+#   tzdata + /etc/localtime 只解决系统调用，TZ 环境变量还要单独给：Node、
+#   Python、glib 系程序读的是 TZ，不给就会出现「date 是 CST、日志是 UTC」。
+#   musl 的 locale 默认就是 C.UTF-8，这里显式写出来是给上层应用看的；
+#   en_US.UTF-8 在 musl 下拿不到 glibc 语义，别指望。
+# ===================================================================
+ENV TZ=Asia/Shanghai \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
+# ===================================================================
+# STEP 4: 下游工具链环境变量
+#   CHROME_BIN / PUPPETEER_EXECUTABLE_PATH 指向包装脚本 /usr/bin/chromium
+#   （它会转调 /usr/lib/chromium/chromium 并附加 CHROMIUM_FLAGS）。
+#   PUPPETEER_SKIP_DOWNLOAD=1 让派生镜像 npm i puppeteer 时不再自带一份
+#   浏览器；需要官方 Chromium 时下游自行覆盖这个变量。
+# ===================================================================
+ENV CHROME_BIN=/usr/bin/chromium \
+    CHROME_PATH=/usr/bin/chromium \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
+    PUPPETEER_SKIP_DOWNLOAD=1
+
+# ===================================================================
+# STEP 5: 预置非 root 用户与工作目录
+#   默认仍然是 root（容器内 root + --no-sandbox 是无头 Chromium 的常见组合），
+#   这里只是把下游写一行 `USER chrome` 需要的东西先备好：家目录、/work。
+#   /tmp 在 Alpine 里已是 1777，--disable-dev-shm-usage 落盘没有问题。
+# ===================================================================
+RUN addgroup -g 10001 chrome \
+    && adduser -D -u 10001 -G chrome -h /home/chrome -s /sbin/nologin chrome \
+    && mkdir -p /home/chrome /work \
+    && chown chrome:chrome /home/chrome /work
+
+# 输出 / 下载统一挂到 /work，避免写进容器可写层
+WORKDIR /work
+
+# ===================================================================
+# STEP 6: OCI 元数据标签
+#   created / revision 由 CI 传 --build-arg 注入；直接 docker build 时是
+#   unknown，不会污染镜像语义。Chromium 的精确版本写在镜像内
+#   /usr/share/alpine-chromium/VERSION，并同步进 CI 元数据。
+# ===================================================================
+LABEL org.opencontainers.image.title="alpine-chromium" \
+    org.opencontainers.image.description="Alpine + Chromium for headless screenshot / crawling / automation" \
+    org.opencontainers.image.source="${IMAGE_SOURCE}" \
+    org.opencontainers.image.url="${IMAGE_SOURCE}" \
+    org.opencontainers.image.licenses="MIT" \
+    org.opencontainers.image.version="${ALPINE_VERSION}" \
+    org.opencontainers.image.revision="${BUILD_REVISION}" \
+    org.opencontainers.image.created="${BUILD_DATE}" \
+    org.opencontainers.image.base.name="docker.io/library/alpine:${ALPINE_VERSION}" \
+    dev.alpine-chromium.cjk="${WITH_CJK}"
+
+# 无头启动参数刻意不写进镜像：--no-sandbox 取决于是否 root，--disable-dev-shm-usage
+# 取决于 /dev/shm 大小，属于使用方的运行时选择（见 CONTRIBUTING.md 的硬性规则）。
+# 运行时用环境变量追加即可，Alpine 的 chromium 启动器会把它接在系统默认值之后：
+#   docker run -e CHROMIUM_USER_FLAGS="--no-sandbox --disable-dev-shm-usage" ...
+# 需要「开箱即带默认参数」时用 Dockerfile.headless 叠一层。

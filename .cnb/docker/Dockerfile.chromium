@@ -9,13 +9,13 @@
 
 # ===================================================================
 # 构建参数 (ARG)
-#   ALPINE_VERSION 钉具体补丁版本，不用 latest：
-#   chromium 在 community 仓库，而 Alpine 的 community 只维护到下一个 stable
-#   发布，因此每个分支里的 chromium 都会「冻住」——3.20/3.21/3.22 分别停在
-#   chromium 131 / 136 / 142，浏览器 CVE 就只能等换分支才修得掉。
-#   3.24 是当前同时维护 main 与 community 的分支。
+#   ALPINE_VERSION 基础镜像版本。默认 latest = 跟随上游最新稳定版，每天重建
+#   自动吃到新补丁/新小版本；也可钉具体版本（如 3.24.3）做复现或审计。
+#   注意 chromium 在 community 仓库，每个分支的 chromium 会随 Alpine 分支
+#   「冻住」（3.20/3.21/3.22 分别停在 chromium 131/136/142），换分支才会
+#   换浏览器主版本。
 # ===================================================================
-ARG ALPINE_VERSION=3.24.3
+ARG ALPINE_VERSION=latest
 
 # 使用官方 Alpine 作为基础镜像（轻量、安全）
 # Alpine 特点：体积小（约5MB）、安全、适合容器化部署
@@ -24,9 +24,9 @@ FROM alpine:${ALPINE_VERSION}
 # -------------------------------------------------------------------
 # 构建期参数
 #   WITH_*：变体开关，默认全关，主镜像保持最小
-#   EXPECTED_CHROMIUM_MAJOR：期望的 Chromium 主版本。上游在分支内升主版本时
-#     让构建显式失败，避免「镜像内容变了但没人发现」。传 any 可跳过断言；
-#     构建非默认 Alpine 分支时按实际版本填。
+#   EXPECTED_CHROMIUM_MAJOR：期望的 Chromium 主版本。默认空 = 不校验，跟随
+#     上游（每天重建自动吃到新版本）；填具体主版本号才断言，避免「镜像内容
+#     变了但没人发现」；构建非默认 Alpine 分支时按实际版本填。
 #   CACHE_BUST：装包层的缓存击穿点。CI 每天传新值，保证上游补丁进得来；
 #     不传也不影响正确性（只是失去跨轮次缓存复用）。
 #   BUILD_DATE / BUILD_REVISION：写进 OCI 标签，由 CI 传入。
@@ -34,7 +34,7 @@ FROM alpine:${ALPINE_VERSION}
 ARG WITH_CJK=0
 ARG WITH_CHROMEDRIVER=0
 ARG WITH_SWIFTSHADER=0
-ARG EXPECTED_CHROMIUM_MAJOR=155
+ARG EXPECTED_CHROMIUM_MAJOR=
 ARG CACHE_BUST=0
 ARG BUILD_DATE=unknown
 ARG BUILD_REVISION=unknown
@@ -96,13 +96,13 @@ RUN echo "cache-bust: ${CACHE_BUST}" \
     && mkdir -p /usr/share/alpine-chromium \
     && chromium --version >/usr/share/alpine-chromium/VERSION \
     && cat /usr/share/alpine-chromium/VERSION \
-    && if [ "$EXPECTED_CHROMIUM_MAJOR" != "any" ]; then \
+    && if [ -n "$EXPECTED_CHROMIUM_MAJOR" ] && [ "$EXPECTED_CHROMIUM_MAJOR" != "any" ]; then \
          case "$(awk '{print $2}' /usr/share/alpine-chromium/VERSION)" in \
            "${EXPECTED_CHROMIUM_MAJOR}".*) ;; \
            *) \
              echo "❌ chromium 主版本与 EXPECTED_CHROMIUM_MAJOR=${EXPECTED_CHROMIUM_MAJOR} 不符" >&2; \
              echo "   实际: $(cat /usr/share/alpine-chromium/VERSION)" >&2; \
-             echo "   确认渲染冒烟通过后更新 Dockerfile 默认值，或传 --build-arg EXPECTED_CHROMIUM_MAJOR=any 跳过" >&2; \
+             echo "   确认渲染冒烟通过后改传 --build-arg EXPECTED_CHROMIUM_MAJOR=<新版本>，或留空/传 any 跳过" >&2; \
              exit 1 \
              ;; \
          esac; \
@@ -152,10 +152,14 @@ WORKDIR /work
 #   unknown，不会污染镜像语义。Chromium 的精确版本写在镜像内
 #   /usr/share/alpine-chromium/VERSION，并同步进 CI 元数据。
 # ===================================================================
+# 本镜像所在 CNB 仓库的 Web 地址（OCI source/url 标签用）。
+# 构建脚本用 CNB 内置变量 ${CNB_REPO_URL_HTTPS} 传入；不设默认值，
+# 本地 docker build 时需自行 --build-arg。
+ARG IMAGE_SOURCE
 LABEL org.opencontainers.image.title="alpine-chromium" \
     org.opencontainers.image.description="Alpine + Chromium for headless screenshot / crawling / automation" \
-    org.opencontainers.image.source="https://cnb.cool/dtapp/alpine" \
-    org.opencontainers.image.url="https://cnb.cool/dtapp/alpine" \
+    org.opencontainers.image.source="${IMAGE_SOURCE}" \
+    org.opencontainers.image.url="${IMAGE_SOURCE}" \
     org.opencontainers.image.licenses="MIT" \
     org.opencontainers.image.version="${ALPINE_VERSION}" \
     org.opencontainers.image.revision="${BUILD_REVISION}" \

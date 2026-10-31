@@ -1,0 +1,161 @@
+# ===================================================================
+# GitHub Actions：构建并推送 Chromium 镜像到 GHCR
+#
+#   产物：ghcr.io/<owner>/<repo>/chromium  （本仓库即 ghcr.io/dtapps/alpine/chromium）
+#         三个变体：latest / latest-cjk / latest-headless（外加单平台标签）
+#   实现：GitHub 侧独立维护一份（有意复制，不与 CNB 共用）
+#         · Dockerfile  .github/docker/Dockerfile.chromium、Dockerfile.headless
+#         · 构建脚本    .github/scripts/build-chromium.sh
+#         · 对照实现    .cnb/docker/Dockerfile.* + .cnb/scripts/build-chromium.sh
+#
+#   触发：schedule（每天跟上游）/ workflow_dispatch / push 到 main
+#         / pull_request（只构建 default 变体，不推送）
+#
+# 与 CNB 版的差异（复制之后各自演进）：
+#   1. 定时任务 02:00 Asia/Shanghai = 18:00 UTC（GitHub cron 只认 UTC）；
+#   2. 构建器与 QEMU 由 workflow 现装；chromium 的闭包很大，先释放磁盘；
+#   3. 层缓存用 GitHub Actions 缓存（type=gha），不往 GHCR 推 buildcache* 标签；
+#   4. arm64 走 QEMU 模拟，三变体多架构一次要几十分钟，超时给到 240 分钟；
+#   5. 元数据写 .github/annotation.json，供 Step Summary / artifact 使用。
+#
+# 标签契约与 CNB 完全一致，详见 docs/github.md 与
+# docs/chromium/images-and-tags.md。
+# ===================================================================
+name: build-chromium
+
+on:
+  schedule:
+    # 每天 02:00（Asia/Shanghai）= 18:00 UTC。比 CNB 的 01:30 晚 30 分钟，且与
+    # GitHub 自己的 Alpine 任务（16:35 UTC）隔开：chromium 三变体多架构要重得多，
+    # 同时跑只会互相抢上游镜像源带宽。
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        # 这里填的是 Alpine 版本，不是 Chromium 版本（Chromium 版本由 Alpine 分支仓库决定）
+        description: '选填：留空 = latest；也可填 Alpine 版本 3.24 / 3.24.3（不是 Chromium 版本）'
+        required: false
+        default: ''
+        type: string
+      expected_chromium_major:
+        description: '选填：Chromium 主版本断言。留空 = 不校验，跟随上游最新；填 156 表示确认上游升级；填 any 跳过断言'
+        required: false
+        default: ''
+        type: string
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/docker/Dockerfile.chromium'
+      - '.github/docker/Dockerfile.headless'
+      - '.github/scripts/build-chromium.sh'
+      - '.github/workflows/build-chromium.yml'
+  pull_request:
+    paths:
+      - '.github/docker/Dockerfile.chromium'
+      - '.github/docker/Dockerfile.headless'
+      - '.github/scripts/build-chromium.sh'
+      - '.github/workflows/build-chromium.yml'
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build-chromium-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 释放磁盘空间
+        # hosted runner 的临时盘约 14 GiB：三变体 × 两平台的层缓存 + 构建上下文
+        # 会把盘吃满（表现为 buildx 报 no space left on device）。预装 SDK 与本
+        # 构建无关，先删掉换几个 GiB。
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: 安装 QEMU（跨架构构建 arm64）
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: 初始化 buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 构建并推送多架构镜像
+        id: build
+        # 镜像名、revision、source 等由脚本从 Actions 内置变量派生，不必在这里拼：
+        #   IMAGE         ← ghcr.io + GITHUB_REPOSITORY（小写）+ /chromium
+        #   REGISTRY_USER ← GITHUB_ACTOR
+        #   REVISION      ← GITHUB_SHA
+        #   IMAGE_SOURCE  ← https://github.com/<GITHUB_REPOSITORY>
+        # 只有 GITHUB_TOKEN 不会自动进环境变量（要显式从 secrets 传），其余交给脚本。
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ inputs.version }}
+          expected_chromium_major: ${{ inputs.expected_chromium_major }}
+        # 必须 source：脚本内部的 export、trap 与退出码都留在当前 shell
+        run: |
+          source .github/scripts/build-chromium.sh
+
+      - name: 写入运行摘要
+        if: always()
+        run: |
+          {
+            echo '### Chromium 镜像（GHCR）'
+            echo ''
+            if [ -f .github/annotation.json ]; then
+              echo '| 键 | 值 |'
+              echo '| --- | --- |'
+              jq -r 'to_entries[] | "| \(.key) | \(.value) |"' .github/annotation.json
+            else
+              echo '本次没有产出 .github/annotation.json（构建在元数据步骤之前就失败）。'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传构建元数据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chromium-annotation
+          path: .github/annotation.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  validate-chromium:
+    # PR 校验：只构建 default 变体（amd64，不推送），证明 Dockerfile 还能出镜像、
+    # 浏览器还能起来。三变体全跑一遍会让每个 PR 多等几十分钟。
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 初始化 buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 构建（不推送）
+        # 不传 ALPINE_VERSION / WITH_*，验证的是 Dockerfile 里的默认值
+        run: |
+          set -eu
+          docker buildx build --platform linux/amd64 --load --pull \
+            -f .github/docker/Dockerfile.chromium -t alpine-chromium:pr .
+
+      - name: 冒烟测试
+        # 与 build-chromium.sh 的三项断言同源：二进制在、渲染栈可用、时区生效
+        run: |
+          set -eu
+          docker run --rm alpine-chromium:pr chromium --version
+          docker run --rm --shm-size=1g alpine-chromium:pr \
+            chromium --headless --no-sandbox --disable-dev-shm-usage \
+            --dump-dom about:blank >/dev/null
+          [ "$(docker run --rm alpine-chromium:pr date +%Z)" = "CST" ]

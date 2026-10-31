@@ -1,0 +1,160 @@
+# ===================================================================
+# GitHub Actions：构建并推送 Alpine 基础镜像到 GHCR
+#
+#   产物：ghcr.io/<owner>/<repo>            （本仓库即 ghcr.io/dtapps/alpine）
+#   实现：GitHub 侧独立维护一份（有意复制，不与 CNB 共用）
+#         · Dockerfile  .github/docker/Dockerfile.alpine
+#         · 构建脚本    .github/scripts/build-alpine.sh
+#         · 对照实现    .cnb/docker/Dockerfile.alpine + .cnb/scripts/build-alpine.sh
+#
+#   触发：schedule（每天跟上游）/ workflow_dispatch / push 到 main
+#         / pull_request（只构建不推送）
+#
+# 为什么复制而不是共用：两侧的标签规则、冒烟断言是同构的，但平台胶水不同
+# （CNB 读 CNB_* 变量、写 commit annotation；这里读 Actions 上下文、写
+# Step Summary/artifact）。复制之后任何一侧改平台相关的东西都不必迁就对方，
+# 代价是改「镜像内容 / 标签规则 / 冒烟断言」时要同步改两份
+# （CONTRIBUTING 的硬性规则里写了这条）。
+#
+# 标签契约与 CNB 完全一致（<alpine 版本> / <major.minor> / latest /
+# <版本>-linux-{amd64,arm64}），详见 docs/github.md 与
+# docs/alpine/images-and-tags.md。
+# ===================================================================
+name: build-alpine
+
+on:
+  schedule:
+    # 每天 00:35（Asia/Shanghai）= 16:35 UTC。GitHub 的 cron 只按 UTC 解析，
+    # 直接抄 CNB 的 5 0 * * * 会在北京时间 08:05 跑。比 CNB 的 00:05 晚 30 分钟：
+    # 两个平台各自拉上游 alpine 镜像源，错开一点避免同一分钟抢同一批索引。
+    - cron: '35 16 * * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        # 与 CNB 按钮的 version 输入完全等价，白名单校验在脚本里
+        description: '选填：留空 = 跟随 Dockerfile 的 alpine:latest；也可填 latest / 3.25 / 3.25.1 / 3.25.1@sha256:<64 位 hex>'
+        required: false
+        default: ''
+        type: string
+  push:
+    branches:
+      - main
+    paths:
+      # 只在构建输入真的变了才重建：改文档、改扫描配置不该消耗一次多架构构建
+      - '.github/docker/Dockerfile.alpine'
+      - '.github/scripts/build-alpine.sh'
+      - '.github/workflows/build-alpine.yml'
+  pull_request:
+    paths:
+      - '.github/docker/Dockerfile.alpine'
+      - '.github/scripts/build-alpine.sh'
+      - '.github/workflows/build-alpine.yml'
+
+# GITHUB_TOKEN 默认只读，推送 GHCR 必须显式要 packages: write
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  # 定时与手动同时触发时排队而不是并发：两条流水线同时改 latest/3.25 会互相覆盖
+  group: build-alpine-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # PR 走下面的 validate-alpine 作业：不登录、不推送
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 安装 QEMU（跨架构构建 arm64）
+        # arm64 那一层 apk add 在 amd64 runner 上靠 binfmt/QEMU 执行；
+        # 没有这一步 buildx 会在 arm64 阶段报 exec format error。
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: 初始化 buildx
+        # docker-container driver 才能多架构 + 推送 manifest list；
+        # hosted runner 没有预置 builder，必须自己创建。
+        uses: docker/setup-buildx-action@v3
+
+      - name: 构建并推送多架构镜像
+        id: build
+        # 镜像名、revision、source 等由脚本从 Actions 内置变量派生，不必在这里拼：
+        #   IMAGE         ← ghcr.io + GITHUB_REPOSITORY（小写）
+        #   REGISTRY_USER ← GITHUB_ACTOR
+        #   REVISION      ← GITHUB_SHA
+        #   IMAGE_SOURCE  ← https://github.com/<GITHUB_REPOSITORY>
+        # 只有 GITHUB_TOKEN 不会自动进环境变量（要显式从 secrets 传），其余交给脚本。
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ inputs.version }}
+        # 必须 source：脚本里的 export、trap 与退出码都留在当前 shell
+        run: |
+          source .github/scripts/build-alpine.sh
+
+      - name: 写入运行摘要
+        # 构建成功时脚本会在最后写入 .github/annotation.json；失败时没有这个文件。
+        # 这一步只负责把本次元数据贴到 Actions 页面。
+        if: always()
+        run: |
+          {
+            echo '### Alpine 基础镜像（GHCR）'
+            echo ''
+            if [ -f .github/annotation.json ]; then
+              echo '| 键 | 值 |'
+              echo '| --- | --- |'
+              jq -r 'to_entries[] | "| \(.key) | \(.value) |"' .github/annotation.json
+            else
+              echo '本次没有产出 .github/annotation.json（构建在元数据步骤之前就失败）。'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传构建元数据
+        # 标签每天被覆盖，历史只能靠 digest 追；把每次的 JSON 留档便于回查。
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpine-annotation
+          path: .github/annotation.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  validate-alpine:
+    # PR 校验：不推送、不登录，只证明「这份 Dockerfile 能构建、容器能起来」。
+    # 全部用 Dockerfile 默认值（不传 ALPINE_VERSION），这样改了默认值也能被验到。
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 初始化 buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 构建（不推送）
+        run: |
+          set -eu
+          docker buildx build --platform linux/amd64 --load --pull \
+            -f .github/docker/Dockerfile.alpine -t alpine:pr .
+
+      - name: 冒烟测试
+        # 与 build-alpine.sh 的六项断言同源，去掉「版本前缀」与「OCI 标签 version」
+        # 两项：那两项依赖脚本解析出的实际版本，PR 里没传参。
+        run: |
+          set -eu
+          docker run --rm alpine:pr sh -eu -c '
+            [ -n "$(cat /etc/alpine-release)" ]
+            [ "$(cat /etc/timezone)" = "Asia/Shanghai" ]
+            [ "$(date +%z)" = "+0800" ]
+            [ "$(wc -l </etc/apk/repositories)" -eq 4 ]
+            for b in curl drill nc nslookup; do
+              command -v "$b" >/dev/null 2>&1
+            done
+            printf "SMOKE_OK"
+          '

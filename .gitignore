@@ -1,2 +1,4 @@
 # CI 生成物：构建后写入的镜像元数据，供 cnbcool/annotations 插件读取
 .cnb/annotation.json
+# CI 生成物：GitHub Actions 构建写入的镜像元数据，供 Step Summary / artifact 读取
+.github/annotation.json

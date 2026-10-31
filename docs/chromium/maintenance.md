@@ -59,7 +59,7 @@ docker buildx imagetools inspect alpine:3.24
 
 不需要改任何文件。`Dockerfile` 用 `cut -d'.' -f1,2 /etc/alpine-release` 推导源路径，新补丁版本自带同样的 `v3.24` 路径，源列表不用动。动作只有一次重建：`latest` 等定时构建，版本标签手动点按钮。
 
-`Dockerfile` 里 `ARG ALPINE_VERSION` 的默认值钉的是补丁版本（当前 `3.24.3`），只有 CI 传 `version=latest` 时才会用 `alpine:latest`。本地想复现线上行为，构建时显式传 `--build-arg ALPINE_VERSION=latest`。
+`Dockerfile` 里 `ARG ALPINE_VERSION` 的默认值是 `latest`，CI 定时任务也传 `version=latest`，行为一致。要钉住某个补丁版本做复现或审计时，显式传 `--build-arg ALPINE_VERSION=3.24.3`。
 
 小版本升级同样会换掉 `chromium` 包版本。多数时候主版本不动，但偶尔会跨过主版本：这时构建会在 `EXPECTED_CHROMIUM_MAJOR` 的断言处**显式失败**并打印实际版本，按提示复核渲染后更新默认值即可，不要直接把断言删掉。
 

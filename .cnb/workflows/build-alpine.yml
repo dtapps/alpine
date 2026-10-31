@@ -37,3 +37,53 @@
           settings:
             type: ADD
             fromJsonFile: .cnb/annotation.json
+
+  # PR 校验：不推送，只证明「这份 Dockerfile 能构建、容器能起来」。
+  # 只对真正改到 alpine 构建输入的 PR 生效，纯文档 PR 直接跳过：
+  # 否则改一行 README 也要等一次多分钟的多架构构建。
+  pull_request:
+    - name: validate-alpine
+      runner:
+        tags: cnb:arch:amd64
+      services:
+        - docker
+      stages:
+        - name: 构建（不推送）与冒烟
+          script: |
+            set -eu
+            # 判断本次 PR 是否触及 alpine 的构建输入；判断不出来时按「要校验」处理
+            changed=""
+            if [ -n "${CNB_TARGET_BRANCH:-}" ] \
+              && git rev-parse --verify "origin/${CNB_TARGET_BRANCH}" >/dev/null 2>&1; then
+              changed="$(git diff --name-only "origin/${CNB_TARGET_BRANCH}...HEAD" 2>/dev/null || true)"
+            elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+              changed="$(git diff --name-only HEAD~1 2>/dev/null || true)"
+            fi
+            case "${changed}" in
+              *.cnb/docker/Dockerfile.alpine* | *.cnb/scripts/build-alpine.sh* | *.cnb/workflows/build-alpine.yml*)
+                echo "变更涉及 alpine 构建输入，开始校验"
+                ;;
+              "")
+                echo "无法确定变更范围，默认执行校验"
+                ;;
+              *)
+                echo "变更不涉及 alpine 构建输入，跳过校验："
+                printf '%s\n' "${changed}"
+                exit 0
+                ;;
+            esac
+            # 不传 ALPINE_VERSION，验证的就是 Dockerfile 里的默认值，
+            # 免得 PR 改了默认值却仍按旧值校验。
+            docker buildx build --platform linux/amd64 --load --pull \
+              -f .cnb/docker/Dockerfile.alpine -t alpine:pr . || exit 1
+            # 1) 基座版本有输出、时区正确、源行数对、四个命令可执行
+            docker run --rm alpine:pr sh -eu -c '
+              [ -n "$(cat /etc/alpine-release)" ]
+              [ "$(cat /etc/timezone)" = "Asia/Shanghai" ]
+              [ "$(date +%z)" = "+0800" ]
+              [ "$(wc -l </etc/apk/repositories)" -eq 4 ]
+              for b in curl drill nc nslookup; do
+                command -v "$b" >/dev/null 2>&1
+              done
+              printf "SMOKE_OK"
+            ' | grep -q 'SMOKE_OK' || exit 1

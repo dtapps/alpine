@@ -2,6 +2,17 @@
 
 > 镜像地址 `docker.cnb.cool/dtapp/alpine/chromium`。标签是一份对外契约：一次构建产出哪些名字、三种变体怎么组合、单平台与多架构的差别、下游该固定到标签还是 digest，都在这里。
 
+## 两个平台：CNB 与 GHCR
+
+同一套变体与标签规则同时发布到两个 registry，各推各的、互不引用：
+
+| 平台   | 镜像地址                                | 流水线                                 |
+|--------|-----------------------------------------|----------------------------------------|
+| CNB    | `docker.cnb.cool/dtapp/alpine/chromium` | `.cnb.yml` + `.cnb/workflows/`         |
+| GitHub | `ghcr.io/dtapps/alpine/chromium`        | `.github/workflows/build-chromium.yml` |
+
+三个变体（`latest` / `-cjk` / `-headless`）、标签矩阵、冒烟断言完全一致，但两边是两份副本（`.cnb/scripts/build-chromium.sh` 与 `.github/scripts/build-chromium.sh`，Dockerfile 同理）：平台胶水各自维护，改标签规则时两份都要改。digest 不同——各 registry 各自构建、各自解析基座。GitHub 侧的目录、触发方式与变量契约见 [GitHub Actions 与 GHCR](../github.md)。
+
 ## 三个变体
 
 所有变体由同一份 `.cnb/scripts/build-chromium.sh` 一次跑完，`-headless` 基于同一批次 default 镜像的 digest 叠出来，所以它们的内容同源。
@@ -128,7 +139,7 @@ version=$(echo "$version" | sed 's/[^[:print:]]//g')            # 去不可打�
 | 留空                | `latest`                            |
 | 前后带空格的 `3.24` | `3.24`                              |
 | 末尾带换行的 `3.24` | `3.24`                              |
-| `3.24.3`            | `3.24.3`（钉补丁版本，可选）        |
+| `latest`            | `latest`（跟随上游，默认）          |
 | `v3.24`             | 直接 `exit 1`，不会进到构建阶段     |
 | `155.0.8059.84`     | 直接 `exit 1`（这是 Chromium 版本） |
 

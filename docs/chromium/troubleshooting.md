@@ -48,7 +48,7 @@ docker buildx imagetools inspect alpine:latest
 
 想构建非默认分支（例如 `3.21`）时，`FROM` 能过，但紧接着会被 Dockerfile 的版本断言拦下——这仍是**预期行为**：得同时传 `--build-arg EXPECTED_CHROMIUM_MAJOR=<该分支的 chromium 主版本>`（3.21 是 136，3.22 是 142），并且清楚那个分支的 chromium 已经冻结、3.20 更是早已 EOL。
 
-定时任务传的是 `version=latest`，脚本对应传 `--build-arg ALPINE_VERSION=latest`，也就是 `FROM alpine:latest`；而 `Dockerfile` 里的默认值钉的是补丁版本（当前 `3.24.3`），本地直接 `docker build` 用的就是它。所以「定时任务失败、本地构建成功」时，先看 Runner 出网，再看你本地用的基础版本与 CI 是否一致。
+定时任务传的是 `version=latest`，脚本对应传 `--build-arg ALPINE_VERSION=latest`，`Dockerfile` 默认值也是 `latest`，行为一致。所以「定时任务失败、本地构建成功」时，先看 Runner 出网，再看你本地是否显式钉了与 CI 不同的基础版本。
 
 ### `apk add` 超时或 404
 
