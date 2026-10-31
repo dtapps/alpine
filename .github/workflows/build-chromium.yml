@@ -83,7 +83,7 @@ jobs:
           df -h /
 
       - name: 安装 QEMU（跨架构构建 arm64）
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
 
