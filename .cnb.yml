@@ -16,6 +16,8 @@ main:
   # 基座用 Dockerfile 默认的 alpine:latest（每天跟上游），构建脚本把实际版本解析出来
   # （如 3.25.1），直接推 <实际版本> 标签，冒烟通过后才把 latest / minor 提升到该
   # digest；同名标签每天被覆盖，回查某天的产物要靠 annotation 里记录的 digest。
+  # 这些标签同时是 01:05 Chromium 流水线的基座，latest 提升失败时下游会自动
+  # 使用上一份基座，直到下一次冒烟通过。
   'crontab: 5 0 * * *':
     - name: build-alpine
       runner:
@@ -48,16 +50,23 @@ main:
             type: ADD
             fromJsonFile: .cnb/annotation.json
 
-  # 每天 01:30（Asia/Shanghai）执行，与上面 00:05 的 Alpine 基础镜像错峰：
-  # chromium 三变体多架构一次构建要重得多，两条一起跑只会抢 runner 和制品库带宽。
+  # 每天 01:05（Asia/Shanghai）执行，必须排在 00:05 的 Alpine 基础镜像之后，
+  # 中间留 1 小时给基座构建与 latest 提升：Chromium 的基座就是上面那条流水线
+  # 产出的 dtapp/alpine:latest。错峰同时避免 chromium 多架构构建与基座
+  # 构建抢 runner 和制品库带宽。
+  #
+  # 标签与基座同一套契约：<alpine 版本> / <major.minor> / latest 与
+  # <版本>-linux-{amd64,arm64}；版本号从基座容器里解析，不是入参。
+  # latest / minor 只在 dtapp/alpine 的同名标签已指向本次基座 digest 时提升，
+  # 所以 chromium 永远不会跑到基座前面。
   #
   # 定时任务没有按钮输入，所以两个输入都不传，等价于：
-  #   version=latest                 → 基座跟上游 alpine:latest（默认即 latest）
+  #   version=latest                 → 基座取 dtapp/alpine:latest（00:05 产出）
   #   expected_chromium_major=空      → 不校验，跟随上游最新 Chromium 主版本
   # 上游在分支内换 Chromium 主版本时构建正常跟随、不会失败；只有手动填了
   # expected_chromium_major=<旧主版本> 做显式校验时，上游升级才会让构建红——
   # 这时改填新版本号或 any 即可。
-  'crontab: 30 1 * * *':
+  'crontab: 5 1 * * *':
     - name: build-chromium
       runner:
         tags: cnb:arch:amd64 # 指定 Runner 必须有这个标签

@@ -6,11 +6,11 @@
 
 ```bash
 docker build -f .cnb/docker/Dockerfile.alpine -t alpine:local .   # 默认 ALPINE_VERSION=latest
-docker run --rm alpine:local sh -c 'cat /etc/alpine-release; date; command -v curl drill'
+docker run --rm alpine:local sh -c 'cat /etc/alpine-release; date; command -v curl drill git nc nslookup'
 ```
 
 - 构建上下文是仓库根目录（命令最后的 `.`），Dockerfile 在 `.cnb/docker/`，所以必须 `-f` 指定；`COPY` 之类的相对路径仍以根目录为基准。
-- 不传 `--build-arg` 时用的是 `ARG ALPINE_VERSION=latest` 的默认值，与 CI 定时任务完全一致：本地这一跑就等于「今天上游最新的 alpine + 五个包」，和 cron 当天的产物同源同内容。
+- 不传 `--build-arg` 时用的是 `ARG ALPINE_VERSION=latest` 的默认值，与 CI 定时任务完全一致：本地这一跑就等于「今天上游最新的 alpine + 六个包」，和 cron 当天的产物同源同内容。
 - 想复现某次具体产物，别改文件，传参即可：`--build-arg ALPINE_VERSION=3.25.1`（要位级一致就带 `@sha256:...`）。钉住之后 `FROM` 拉到的就是那一份，与上游当天发没发新补丁无关。
 - 这是最快的验证路径：宿主架构即产物架构，产物直接进本地 image store，可以立刻 `docker run`。
 
@@ -68,7 +68,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 - 同一个 builder 内的 BuildKit 层缓存自动复用，这是本地反复构建同一条命令很快的原因。CI 每次都是新 runner，这层缓存基本用不上。
 - 缓存键由「本层指令 + 上层内容」算出，所以 Dockerfile 的段落顺序直接决定复用率：换源、装包、写时区、清理压在同一层里，改包列表必然重建这一整层——这是有意的取舍，理由见 [Dockerfile 解析](dockerfile.md#为什么只有一个-run)。
 - **CI 刻意不启用 registry 缓存**（没有 `--cache-from` / `--cache-to`，也不会产生 `:buildcache` 这样的标签）。理由不是「忘了配」，而是这套缓存对本镜像有害：镜像只有一个 `RUN`，registry 缓存能复用的就是这一层，一旦命中，`apk add` 根本不会执行——每日 cron 会永远装到同一批包，上游在分支里发布的包级安全补丁永远进不来，「构建成功」会变成「构建没做事」。基座跟随 `latest` 之后这一点更要紧：`FROM` 已经换了新 digest，那一层要是命中旧缓存，镜像内容会和标签上的版本号对不上。
-- 不启用缓存的代价很小：每次多跑一遍「4 个索引 + 5 个包」，实测是秒级；而镜像本来就只有一个层、一次构建，没有「多层重复编译」那种值得优化的东西。换来的是**「每天重建 = 真的刷新依赖」**这个语义，对基础镜像来说这笔交换明显划算。
+- 不启用缓存的代价很小：每次多跑一遍「2 个索引 + 6 个包」，实测是秒级；而镜像本来就只有一个层、一次构建，没有「多层重复编译」那种值得优化的东西。换来的是**「每天重建 = 真的刷新依赖」**这个语义，对基础镜像来说这笔交换明显划算。
 - 需要快的时候，能指望的只有本地 BuildKit 层缓存与单层结构本身：本地反复构建时同一条命令会命中缓存，改 Dockerfile 才会真正重跑那一层。
 - `--provenance` 与 `--sbom` 默认都开，会产生额外的 attestation 清单，这些清单不占层体积，但会混进 `imagetools inspect` 的输出。所以体积统计必须先定位到平台镜像清单再对 `layers` 求和，不能对 index 的各个条目直接相加——拿到手的会是「清单 JSON 自身」的一两 KB。CI 里显式传 `--provenance=mode=min --sbom=false`，把这类噪声压到最小。
 
@@ -174,8 +174,8 @@ docker buildx build -t "${IMAGE}:${STAMP}" --platform linux/amd64,linux/arm64 \
 | 1 | `cut -d- -f1 /etc/alpine-release` 等于 `ALPINE_REAL` | 镜像确实基于当次解析出的基座 |
 | 2 | `/etc/timezone` 是 `Asia/Shanghai`                   | 时区文件写入                 |
 | 3 | `date +%z` 是 `+0800`                                | 时区真的生效                 |
-| 4 | `/etc/apk/repositories` 恰好四行                     | 源没被写坏                   |
-| 5 | `curl`/`drill`/`nc`/`nslookup` 都可执行              | 预装工具齐全                 |
+| 4 | `/etc/apk/repositories` 恰好两行                     | 源没被写坏                   |
+| 5 | `curl`/`drill`/`git`/`nc`/`nslookup` 都可执行        | 预装工具齐全                 |
 | 6 | label `org.opencontainers.image.version` 等于 STAMP  | 版本标签写对了               |
 
 第 1 项是基座跟随 `latest` 之后新增的：既然基座每天都可能变，就必须确认「这次装的包确实来自我以为的那个 alpine 版本」，否则标签上的版本号就是假的。第 6 项在容器外单独用 `docker image inspect` 校验。

@@ -39,16 +39,15 @@ IMAGE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}/chromium" # Chromium �
 
 ## 触发矩阵
 
-| 事件                                | 定义位置                                                            | 产物                                                                                                |
-|-------------------------------------|---------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------|
-| `web_trigger_build_alpine`          | `.cnb/workflows/build-alpine.yml`                                   | 解析基座版本 → 一次多架构 `buildx build --push` → 派生单平台标签 → 冒烟 → 提升 `latest` / `<minor>` |
-| `web_trigger_build_chromium`        | `.cnb/workflows/build-chromium.yml`                                 | default / `-cjk` / `-headless` 三个变体 + 单平台标签，推到 `<repo>/chromium`                        |
-| `'crontab: 5 0 * * *'`              | `.cnb.yml` 的 `main`                                                | 同 Alpine 手动构建；定时任务不传 `version`，走 Dockerfile 默认的 `alpine:latest`                    |
-| `'crontab: 30 1 * * *'`             | `.cnb.yml` 的 `main`                                                | 同 Chromium 手动构建；与 Alpine 错峰                                                                |
-| `pull_request`                      | `.cnb/workflows/build-chromium.yml`                                 | 只构建不推送，验 chromium 的 Dockerfile 与渲染冒烟                                                  |
-| `push`                              | `.cnb/workflows/{sca,knowledge-base}.yml`                           | SCA 报告、知识库索引                                                                                |
-| `pull_request`                      | `.cnb/workflows/{code-review,cnb-sechook,code-security-config}.yml` | PR 评论、扫描与敏感信息统计、配置校验                                                               |
-| `tag_push` / `web_trigger_codewiki` | `.cnb/workflows/codewiki.yml`                                       | Code Wiki                                                                                           |
+| 事件                                | 定义位置                                                            | 产物                                                                                                                                  |
+|-------------------------------------|---------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
+| `web_trigger_build_alpine`          | `.cnb/workflows/build-alpine.yml`                                   | 解析基座版本 → 一次多架构 `buildx build --push` → 派生单平台标签 → 冒烟 → 提升 `latest` / `<minor>`                                   |
+| `web_trigger_build_chromium`        | `.cnb/workflows/build-chromium.yml`                                 | 选本仓库基座标签并解析实际版本与 digest → 一次多架构构建 → 单平台标签 → 冒烟 + OCI 校验 → 提升 minor / latest，推到 `<repo>/chromium` |
+| `'crontab: 5 0 * * *'`              | `.cnb.yml` 的 `main`                                                | 同 Alpine 手动构建；定时任务不传 `version`，走 Dockerfile 默认的 `alpine:latest`                                                      |
+| `'crontab: 5 1 * * *'`              | `.cnb.yml` 的 `main`                                                | 同 Chromium 手动构建；排在 `00:05` 基座之后 1 小时，取当天基座 `latest`                                                               |
+| `push`                              | `.cnb/workflows/{sca,knowledge-base}.yml`                           | SCA 报告、知识库索引                                                                                                                  |
+| `pull_request`                      | `.cnb/workflows/{code-review,cnb-sechook,code-security-config}.yml` | PR 评论、扫描与敏感信息统计、配置校验                                                                                                 |
+| `tag_push` / `web_trigger_codewiki` | `.cnb/workflows/codewiki.yml`                                       | Code Wiki                                                                                                                             |
 
 定时任务只在 `main` 顶层键下声明，所以只对默认分支生效；时间按 `Asia/Shanghai` 解释（`.cnb.yml` 里直接写北京时间）。
 
@@ -56,13 +55,13 @@ IMAGE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}/chromium" # Chromium �
 
 `.cnb/web_trigger.yml` 定义手动入口，`event` 必须与 workflow 文件里的事件键逐字一致，否则按钮点下去不会产生流水线：
 
-| 按钮                                       | event                        | 权限                       | 输入                                                |
-|--------------------------------------------|------------------------------|----------------------------|-----------------------------------------------------|
-| 打包 Alpine 镜像（多架构 amd64 + arm64）   | `web_trigger_build_alpine`   | owner / master / developer | `version`：留空 = 跟随 `alpine:latest`              |
-| 打包 Chromium 镜像（多架构 amd64 + arm64） | `web_trigger_build_chromium` | owner / master / developer | `version`（Alpine 版本）、`expected_chromium_major` |
-| 生成 Code Wiki                             | `web_trigger_codewiki`       | owner / master / developer | 无                                                  |
+| 按钮                                       | event                        | 权限                       | 输入                                                              |
+|--------------------------------------------|------------------------------|----------------------------|-------------------------------------------------------------------|
+| 打包 Alpine 镜像（多架构 amd64 + arm64）   | `web_trigger_build_alpine`   | owner / master / developer | `version`：留空 = 跟随 `alpine:latest`                            |
+| 打包 Chromium 镜像（多架构 amd64 + arm64） | `web_trigger_build_chromium` | owner / master / developer | `version`（Alpine 版本，也是基座标签）、`expected_chromium_major` |
+| 生成 Code Wiki                             | `web_trigger_codewiki`       | owner / master / developer | 无                                                                |
 
-输入值的白名单校验在脚本里（`version` 只接受 `latest` / `3.25` / `3.25.1` / `3.25.1@sha256:…`），所以按钮上写错不会跑一半才失败。
+输入值的白名单校验在脚本里：Alpine 侧 `version` 接受 `latest` / `3.25` / `3.25.1` / `3.25.1@sha256:…`；Chromium 侧只接受 `latest` / `3.25` / `3.25.1`（它要用版本号去找同名基座标签，不接受上游 digest），且产物标签用解析出的实际版本。按钮上写错不会跑一半才失败。
 
 ## imports 与凭证
 
@@ -81,9 +80,9 @@ IMAGE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}/chromium" # Chromium �
 | 地址来源 | `CNB_DOCKER_REGISTRY` + `CNB_REPO_SLUG_LOWERCASE`           | `ghcr.io` + `GITHUB_REPOSITORY`（小写）                        |
 | 登录凭证 | `CNB_TOKEN` / `CNB_TOKEN_USER_NAME`（组织密钥仓库 imports） | `secrets.GITHUB_TOKEN`（Actions 临时签发）                     |
 | builder  | `services: docker` 自带多架构 buildx                        | `docker/setup-qemu-action` + `docker/setup-buildx-action` 现装 |
-| arm64    | runner 内置 binfmt                                          | QEMU 模拟（chromium 三变体多架构要几十分钟）                   |
-| 缓存     | Alpine 不用；Chromium 用 registry cache（`buildcache*`）    | Alpine 不用；Chromium 用 Actions 缓存（`type=gha`）            |
-| 定时任务 | `main` 下 `crontab`，北京时间 00:05 / 01:30                 | `on.schedule`，UTC 16:35 / 18:00（= 北京时间 00:35 / 02:00）   |
+| arm64    | runner 内置 binfmt                                          | QEMU 模拟（chromium 多架构要几十分钟）                         |
+| 缓存     | 两个镜像都不用 registry 缓存（无 `buildcache*` 标签）       | Alpine 不用；Chromium 用 Actions 缓存（`type=gha`）            |
+| 定时任务 | `main` 下 `crontab`，北京时间 00:05 / 01:05                 | `on.schedule`，UTC 16:35 / 17:35（= 北京时间 00:35 / 01:35）   |
 | 元数据   | `.cnb/annotation.json` → commit annotation → 徽章           | `.github/annotation.json` → Step Summary + artifact            |
 | 手动入口 | `web_trigger.yml` 按钮 + 输入项                             | `workflow_dispatch` + inputs                                   |
 
@@ -95,14 +94,15 @@ IMAGE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}/chromium" # Chromium �
 
 ## 排错入口
 
-| 症状                               | 常见原因                                                                    | 先看哪里                          |
-|------------------------------------|-----------------------------------------------------------------------------|-----------------------------------|
-| 点按钮没有任何流水线产生           | `web_trigger.yml` 的 `event` 与 workflow 事件键不一致，或文件没进 `include` | 按钮定义、`.cnb.yml` 的 `include` |
-| 脚本报 version 非法                | 输入不是 `latest` / `3.25` / `3.25.1` / `3.25.1@sha256:<64hex>`             | 白名单校验的报错输出              |
-| `sed: can't read "${DOCKERFILE…}"` | 脚本被当成 import 处理，`${...}` 被改写                                     | `.cnb.yml` 的 `imports` 列表      |
-| 冒烟失败、`latest` 没更新          | 基座版本前缀、时区、源行数、命令缺失、OCI 标签不符                          | 冒烟步骤的断言输出                |
-| 徽章显示 `unknown`                 | 元数据解析失败（体积记 `-1`）或 digest 未取到                               | 日志里的「体积解析失败」行        |
-| 定时任务不生效                     | 定时任务只在 `main` 顶层键下声明，或仓库 60 天无活动被平台停用              | `.cnb.yml`、平台设置              |
+| 症状                               | 常见原因                                                                    | 先看哪里                                             |
+|------------------------------------|-----------------------------------------------------------------------------|------------------------------------------------------|
+| 点按钮没有任何流水线产生           | `web_trigger.yml` 的 `event` 与 workflow 事件键不一致，或文件没进 `include` | 按钮定义、`.cnb.yml` 的 `include`                    |
+| 脚本报 version 非法                | 输入不是 `latest` / `3.25` / `3.25.1`（Chromium 侧不接受 digest）           | 白名单校验的报错输出                                 |
+| `sed: can't read "${DOCKERFILE…}"` | 脚本被当成 import 处理，`${...}` 被改写                                     | `.cnb.yml` 的 `imports` 列表                         |
+| 冒烟失败、`latest` 没更新          | 基座版本前缀、时区、源行数、命令缺失、OCI 标签不符                          | 冒烟步骤的断言输出                                   |
+| Chromium 报「找不到基座」          | 基座标签不存在，或 `version` 指向尚未构建的版本                             | 先跑 Alpine 流水线，确认 `<repo>:<alpine 版本>` 存在 |
+| 徽章显示 `unknown`                 | 元数据解析失败（体积记 `-1`）或 digest 未取到                               | 日志里的「体积解析失败」行                           |
+| 定时任务不生效                     | 定时任务只在 `main` 顶层键下声明，或仓库 60 天无活动被平台停用              | `.cnb.yml`、平台设置                                 |
 
 ## 相关文档
 

@@ -9,17 +9,17 @@
 
 ## 先选镜像
 
-| 你要做的事                                   | 看这里                                                      |
-|----------------------------------------------|-------------------------------------------------------------|
-| 容器里要 `curl` / `dig` / `nc` 这类排障工具  | [Alpine 基础镜像](alpine/README.md)                         |
-| 容器里要跑无头浏览器（截图、PDF、E2E）       | [Chromium 镜像](chromium/README.md)                         |
-| 两个都要，或想把浏览器装在带排障工具的基座上 | 分别拉两个镜像，或基于 Chromium 镜像派生（见其 `build.md`） |
+| 你要做的事                                  | 看这里                                                                                                            |
+|---------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
+| 容器里要 `curl` / `dig` / `nc` 这类排障工具 | [Alpine 基础镜像](alpine/README.md)                                                                               |
+| 容器里要跑无头浏览器（截图、PDF、E2E）      | [Chromium 镜像](chromium/README.md)                                                                               |
+| 两个都要                                    | 直接用 Chromium 镜像：它已叠在本仓库的 Alpine 基座上，继承 `curl` / `nc` / `drill` / `git`；缺 `dig` 等再派生一层 |
 
 ## 两个镜像的关系
 
-- **互不依赖**：Chromium 镜像 `FROM alpine:3.24.3`（官方），不基于本仓库的 Alpine 基础镜像；`-headless` 变体叠在 Chromium 镜像之上。
-- **发布独立**：两条流水线、两条定时任务（Alpine `00:05`、Chromium `01:30`），互不影响。
-- **标签独立**：Alpine 在 `dtapp/alpine`，Chromium 在子路径 `dtapp/alpine/chromium`，标签命名规则各自固定。
+- **有依赖**：Chromium 镜像 `FROM` 本仓库构建的 Alpine 基础镜像（CI 按 `<仓库 slug>:<alpine 版本>` 解析实际版本与 digest 钉住），因此自动继承基座的时区、APK 源与 `curl` / `nc` / `drill` / `git`。Dockerfile 的默认基座是官方 `alpine:${ALPINE_VERSION}`，只用于不依赖私有仓库的本地构建。`-headless` 只是本地派生配方，CI 不发布。
+- **发布有先后**：两条流水线、两条定时任务，Alpine `00:05` 先产基座，Chromium `01:05` 再消费；基座标签不存在时 Chromium 构建直接失败。
+- **标签同构**：两个镜像都用 `<alpine 版本>` / `<major.minor>` / `latest` / `<版本>-linux-{amd64,arm64}` 这 5 个标签；Chromium 在子路径 `dtapp/alpine/chromium`，命名空间独立。
 - **共用部分**：根目录的 [CONTRIBUTING.md](../CONTRIBUTING.md)、[SECURITY.md](../SECURITY.md)、`Makefile` 与 `.cnb/workflows/` 里与构建无关的扫描/评审流水线。
 
 ## 文档怎么组织
@@ -36,7 +36,7 @@
 | `ci-pipeline.md`         | 事件矩阵、按钮与权限、imports、插件职责            |
 | `metadata-and-badges.md` | 元数据键、写入链路、徽章、按平台算体积             |
 | `security-baseline.md`   | 攻击面、扫描能力、排除规则                         |
-| `mirrors.md`             | APK 源顺序与失效处置                               |
+| `mirrors.md`             | APK 源策略与失效处置                               |
 | `getting-started.md`     | 快速上手与常见用法                                 |
 | `maintenance.md`         | 补丁节奏、版本升级、周期性检查                     |
 | `troubleshooting.md`     | 症状到处置的排查手册                               |

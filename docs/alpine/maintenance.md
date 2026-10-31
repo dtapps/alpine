@@ -56,13 +56,13 @@ docker pull "${IMAGE}@${DIGEST}"
 docker buildx imagetools inspect alpine:latest
 ```
 
-**第二步：确认新版本的源路径可用。** Dockerfile 把容器内 `/etc/alpine-release` 的 `major.minor` 拼成 `vX.Y` 写进 `/etc/apk/repositories`，镜像站同步滞后时 `apk add` 会 404 或超时。
+**第二步：确认新版本的源路径可用。** CNB 侧 Dockerfile 只把基座源的主机名替换为腾讯云，`vX.Y` 路径由上游镜像自带，腾讯云同步滞后时 `apk add` 会 404 或超时；GitHub 侧不换源，路径由官方镜像自带。
 
-**第三步：确认五个包在新版本仓库里仍然可用。** `netcat-openbsd`、`drill` 在大版本间移动过仓库的情况要先排除：
+**第三步：确认六个包在新版本仓库里仍然可用。** `netcat-openbsd`、`drill`、`git` 在大版本间移动过仓库的情况要先排除：
 
 ```bash
 docker run --rm alpine:latest sh -c \
-  'apk add --no-cache ca-certificates curl drill netcat-openbsd tzdata'
+  'apk add --no-cache ca-certificates curl drill git netcat-openbsd tzdata'
 ```
 
 **第四步：本地构建并跑容器自检。**
@@ -70,20 +70,20 @@ docker run --rm alpine:latest sh -c \
 ```bash
 docker build -f .cnb/docker/Dockerfile.alpine -t alpine:local .
 docker run --rm alpine:local sh -c \
-  'cat /etc/alpine-release; date; cat /etc/timezone; cat /etc/apk/repositories; command -v curl drill nc nslookup'
+  'cat /etc/alpine-release; date; cat /etc/timezone; cat /etc/apk/repositories; command -v curl drill git nc nslookup'
 ```
 
 **第五步：逐项核对验证清单。** 这份清单与流水线里的冒烟断言一一对应，本地通过就等于冒烟会通过。
 
-| 检查项   | 命令                                                                   | 期望                                                    |
-|----------|------------------------------------------------------------------------|---------------------------------------------------------|
-| 基座版本 | `cat /etc/alpine-release`                                              | 新版本号，与元数据里的 `alpine_version` 一致            |
-| 时区     | `date +%z`、`cat /etc/timezone`                                        | `+0800`，时区文件为 `Asia/Shanghai`                     |
-| 源路径   | `cat /etc/apk/repositories`                                            | 恰好四行 `vX.Y`，顺序为 cernet → 腾讯云 → 阿里云 → 官方 |
-| 包策略   | `apk policy ca-certificates curl drill netcat-openbsd tzdata`          | 每个包都有版本与来源仓库，无 `unavailable`              |
-| 工具自检 | `command -v curl drill nc nslookup`                                    | 四个路径都有输出（`dig` 已由 `drill` 取代）             |
-| 时区链接 | `ls -l /etc/localtime`                                                 | 指向 `/usr/share/zoneinfo/Asia/Shanghai`                |
-| OCI 标签 | `docker image inspect --format '{{json .Config.Labels}}' alpine:local` | 九个标签齐全，`base.name`/`base.digest` 有值            |
+| 检查项   | 命令                                                                   | 期望                                                     |
+|----------|------------------------------------------------------------------------|----------------------------------------------------------|
+| 基座版本 | `cat /etc/alpine-release`                                              | 新版本号，与元数据里的 `alpine_version` 一致             |
+| 时区     | `date +%z`、`cat /etc/timezone`                                        | `+0800`，时区文件为 `Asia/Shanghai`                      |
+| 源路径   | `cat /etc/apk/repositories`                                            | `main` + `community` 两行：CNB 主机腾讯云，GitHub 官方源 |
+| 包策略   | `apk policy ca-certificates curl drill git netcat-openbsd tzdata`      | 每个包都有版本与来源仓库，无 `unavailable`               |
+| 工具自检 | `command -v curl drill git nc nslookup`                                | 五个路径都有输出（`dig` 已由 `drill` 取代）              |
+| 时区链接 | `ls -l /etc/localtime`                                                 | 指向 `/usr/share/zoneinfo/Asia/Shanghai`                 |
+| OCI 标签 | `docker image inspect --format '{{json .Config.Labels}}' alpine:local` | 九个标签齐全，`base.name`/`base.digest` 有值             |
 
 **第六步：同步文档。** `README.md`、`SECURITY.md`、`docs/` 里以 `3.25.x` 为例的版本号可以保留（它们只是示例），但如果写了「当前基座是 3.25」这类断言就要跟着改。文档落后于镜像比没有文档更容易误导。
 

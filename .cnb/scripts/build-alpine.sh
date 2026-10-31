@@ -225,7 +225,7 @@ docker buildx inspect >/dev/null || die "buildx builder 不可用"
 # 刻意不用 registry cache（--cache-from/--cache-to）：
 # 本镜像只有一个 RUN，缓存能复用的就是这一层，一旦命中就再也不会执行
 # apk add —— 每日 cron 会永远装到同一批包，分支里的安全补丁进不来。
-# 代价也只是每次多跑一遍「4 个索引 + 5 个包」（实测秒级），换来的是
+# 代价也只是每次多跑一遍「2 个索引 + 6 个包」（实测秒级），换来的是
 # 「每天重建 = 真的刷新依赖」，这个交换对基础镜像成立，故不启用。
 info "构建 ${IMAGE}:${STAMP}（${PLATFORMS}）"
 docker buildx build \
@@ -256,7 +256,7 @@ for arch in amd64 arm64; do
 done
 
 # ---------- 9. 冒烟测试（amd64，只跑一次） ----------
-# 六项断言：基座版本、时区、源数量、四个命令可用性、OCI 版本标签。
+# 六项断言：基座版本、时区、源配置（腾讯云 main + community 两行）、五个命令可用性、OCI 版本标签。
 # 先显式 pull：buildx --push 只把镜像推进制品库，本地没有；让 `docker run` 隐式
 # 拉取会把「Unable to find image ... / Pulling fs layer」写进要断言的输出里。
 docker pull --platform linux/amd64 "${IMAGE}:${STAMP}" \
@@ -268,8 +268,8 @@ if ! smoke_output="$(docker run --rm --platform linux/amd64 \
     [ "$(cut -d- -f1 /etc/alpine-release)" = "${EXPECT_ALPINE}" ] || fail="${fail} alpine-release"
     [ "$(cat /etc/timezone 2>/dev/null)" = "Asia/Shanghai" ] || fail="${fail} /etc/timezone"
     [ "$(date +%z)" = "+0800" ] || fail="${fail} date+%z"
-    [ "$(wc -l </etc/apk/repositories)" -eq 4 ] || fail="${fail} apk-repositories"
-    for b in curl drill nc nslookup; do
+    [ "$(wc -l </etc/apk/repositories)" -eq 2 ] || fail="${fail} apk-repositories"
+    for b in curl drill git nc nslookup; do
       command -v "$b" >/dev/null 2>&1 || fail="${fail} bin:$b"
     done
     if [ -n "${fail}" ]; then printf "FAIL%s" "${fail}"; exit 1; fi

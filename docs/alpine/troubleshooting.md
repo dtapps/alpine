@@ -4,23 +4,23 @@
 
 ## 症状总表
 
-| 症状                                  | 可能原因                                                     | 处置                                   | 对应文档                             |
-|---------------------------------------|--------------------------------------------------------------|----------------------------------------|--------------------------------------|
-| 脚本报 `version` 非法                 | 输入不是 latest / `3.25` / `3.25.1` / `3.25.1@sha256:<64hex> | 按白名单改成合法形态                   | [镜像与标签](images-and-tags.md)     |
-| `FROM` 阶段拉不到基础镜像             | `version` 填了不存在的 tag、或到上游网络不通                 | 换真实存在的 tag，用 `latest` 对照网络 | [构建](build.md)                     |
-| 解析不到基座版本                      | 一次性容器拉不到 `alpine:latest`，或读不到版本文件           | 确认 Runner 出网与 docker 服务，重试   | [CI 流水线](ci-pipeline.md)          |
-| `apk add` 拉索引超时或 404            | 新 minor 的 `vX.Y` 路径镜像站未同步、源站故障                | 确认路径推导值，等同步或退回官方源     | [APK 源与网络](mirrors.md)           |
-| buildx 报 bootstrap 失败              | 自建了 `docker-container` builder                            | 删掉自建 builder，用 CNB 内置 builder  | [构建](build.md)                     |
-| push 返回 401 / 403                   | token 缺失或过期 / 无该仓库写权限                            | 核对 `imports` 与 registry 地址        | [CI 流水线](ci-pipeline.md)          |
-| 冒烟失败、`latest` 没更新             | 基座版本前缀不符、时区、源行数、命令缺失或 OCI 标签不符      | 按断言逐项修，修好重跑即可             | [CI 流水线](ci-pipeline.md)          |
-| 元数据里 digest 是 `unknown`          | 取不到 manifest digest，或元数据步骤没跑                     | 手动 `imagetools inspect` 复核         | [构建元数据](metadata-and-badges.md) |
-| 徽章灰色或显示 `unknown`              | key 拼错、annotation 未写入、看错 commit                     | 对照十个 key 与写入步骤                | [构建元数据](metadata-and-badges.md) |
-| 体积显示 `unknown`                    | 取到的清单里没有 `layers` 字段（拿到的是 index）             | 先按平台清单 digest 再取 `--raw`       | [构建元数据](metadata-and-badges.md) |
-| 单平台标签指向的清单与 index 条目不同 | 派生步骤没用 `imagetools create`（退回成重新构建）           | 核对 digest，重建走派生路径            | [镜像与标签](images-and-tags.md)     |
-| 容器内时间是 UTC                      | 时区未生效，`/etc/localtime` 被覆盖或删了 tzdata             | 检查时区文件与 `TZ` 变量               | [Dockerfile 解析](dockerfile.md)     |
-| `make format` 报 command not found    | 本机缺四个格式化工具之一                                     | 按工具链文档安装                       | [格式化](formatting.md)              |
-| 页面没有构建按钮 / 点了不触发         | 按钮 `event` 与 workflow 触发键不一致或未 include            | 三处事件名对齐                         | [CI 流水线](ci-pipeline.md)          |
-| PR 被 SCA 拦住                        | `failOnSeverity: high` 命中 high 及以上漏洞                  | 升级包或确认误报，不要关掉门禁         | [安全基线](security-baseline.md)     |
+| 症状                                  | 可能原因                                                         | 处置                                   | 对应文档                             |
+|---------------------------------------|------------------------------------------------------------------|----------------------------------------|--------------------------------------|
+| 脚本报 `version` 非法                 | 输入不是 latest / `3.25` / `3.25.1` / `3.25.1@sha256:<64hex>     | 按白名单改成合法形态                   | [镜像与标签](images-and-tags.md)     |
+| `FROM` 阶段拉不到基础镜像             | `version` 填了不存在的 tag、或到上游网络不通                     | 换真实存在的 tag，用 `latest` 对照网络 | [构建](build.md)                     |
+| 解析不到基座版本                      | 一次性容器拉不到 `alpine:latest`，或读不到版本文件               | 确认 Runner 出网与 docker 服务，重试   | [CI 流水线](ci-pipeline.md)          |
+| `apk add` 拉索引超时或 404            | 新 minor 的 `vX.Y` 路径腾讯云未同步（CNB）、官方源故障（GitHub） | 确认源主机与路径，等同步或临时补源     | [APK 源与网络](mirrors.md)           |
+| buildx 报 bootstrap 失败              | 自建了 `docker-container` builder                                | 删掉自建 builder，用 CNB 内置 builder  | [构建](build.md)                     |
+| push 返回 401 / 403                   | token 缺失或过期 / 无该仓库写权限                                | 核对 `imports` 与 registry 地址        | [CI 流水线](ci-pipeline.md)          |
+| 冒烟失败、`latest` 没更新             | 基座版本前缀不符、时区、源行数、命令缺失或 OCI 标签不符          | 按断言逐项修，修好重跑即可             | [CI 流水线](ci-pipeline.md)          |
+| 元数据里 digest 是 `unknown`          | 取不到 manifest digest，或元数据步骤没跑                         | 手动 `imagetools inspect` 复核         | [构建元数据](metadata-and-badges.md) |
+| 徽章灰色或显示 `unknown`              | key 拼错、annotation 未写入、看错 commit                         | 对照十个 key 与写入步骤                | [构建元数据](metadata-and-badges.md) |
+| 体积显示 `unknown`                    | 取到的清单里没有 `layers` 字段（拿到的是 index）                 | 先按平台清单 digest 再取 `--raw`       | [构建元数据](metadata-and-badges.md) |
+| 单平台标签指向的清单与 index 条目不同 | 派生步骤没用 `imagetools create`（退回成重新构建）               | 核对 digest，重建走派生路径            | [镜像与标签](images-and-tags.md)     |
+| 容器内时间是 UTC                      | 时区未生效，`/etc/localtime` 被覆盖或删了 tzdata                 | 检查时区文件与 `TZ` 变量               | [Dockerfile 解析](dockerfile.md)     |
+| `make format` 报 command not found    | 本机缺四个格式化工具之一                                         | 按工具链文档安装                       | [格式化](formatting.md)              |
+| 页面没有构建按钮 / 点了不触发         | 按钮 `event` 与 workflow 触发键不一致或未 include                | 三处事件名对齐                         | [CI 流水线](ci-pipeline.md)          |
+| PR 被 SCA 拦住                        | `failOnSeverity: high` 命中 high 及以上漏洞                      | 升级包或确认误报，不要关掉门禁         | [安全基线](security-baseline.md)     |
 
 ## 构建阶段
 
@@ -52,13 +52,13 @@ docker buildx imagetools inspect alpine:latest
 
 ### `apk add` 拉索引超时或 404
 
-Dockerfile 已经不用 `apk update`：`apk add --no-cache` 自带索引拉取，省掉一整轮索引下载。所以报错出现在唯一 那个 `RUN` 的 `apk add` 行，路径不是手写的，而是从镜像内 `/etc/alpine-release` 推导出的 `vX.Y`：
+Dockerfile 已经不用 `apk update`：`apk add --no-cache` 自带索引拉取，省掉一整轮索引下载。所以报错出现在唯一 那个 `RUN` 的 `apk add` 行。源路径不在本仓库手写：基座自带的 `/etc/apk/repositories` 已经是 `vX.Y` 的 `main` + `community` 两行，Dockerfile 只用 `sed` 换主机名（CNB 换成腾讯云，GitHub 不换）：
 
 ```bash
 docker run --rm alpine:latest sh -c 'cat /etc/alpine-release; cat /etc/apk/repositories'
 ```
 
-看到 `vX.Y` 与报错 URL 里的路径不一致，说明基础镜像的版本与源路径推导对不上（例如手动改了 `repositories`）。 只剩 404 而路径一致，是镜像站尚未同步该 minor：`/etc/apk/repositories` 里只有四行 main 源，按 cernet → 腾讯云 → 阿里云 → 官方 的顺序尝试，最后一行就是官方源兜底。处置是等镜像站同步，不要为了绕开 404 把源顺序改成「官方优先」——那会把国内构建速度一起赔进去。需要 community 里的包时，在 `RUN` 里追加一行 `.../community` 源，而不是把四行全换成 `main + community`。
+看到报错 URL 里的主机不是预期的那一个，说明换源没生效或被人为改过：CNB 侧检查 `sed` 是否命中 `dl-cdn.alpinelinux.org`，GitHub 侧检查是否有人加了换源步骤。只剩 404 而主机正确，是源站尚未同步该 minor：CNB 侧 `/etc/apk/repositories` 是腾讯云主机的 `main` + `community` 两行，没有跨站兜底，腾讯云没同步时 `apk add` 会直接失败；GitHub 侧是官方源的两行。处置是等源站同步；临时换源属于对外行为变更，需要在 PR 里说明，不要在构建脚本里零散堆源。`community` 已经在这两行里，装 community 的包不需要额外加源。
 
 ### buildx bootstrap 失败
 
@@ -114,8 +114,8 @@ docker manifest inspect docker.cnb.cool/dtapp/alpine:3.25.1-linux-amd64
 | `/etc/alpine-release` 前缀不是 `${ALPINE_REAL}` | 解析出的版本与真正拉到的基座不一致（代理缓存、tag 漂移、多平台选中）  |
 | `/etc/timezone` 不是 `Asia/Shanghai`            | `RUN` 里写时区那两行被删或顺序错了                                    |
 | `date +%z` 不是 `+0800`                         | 只写了 `/etc/timezone`，漏了 `/etc/localtime` 的符号链接              |
-| `/etc/apk/repositories` 不是 4 行               | 误把 `community` 也打开（变成 8 行），或写了多余空行                  |
-| `curl`/`drill`/`nc`/`nslookup` 缺失             | 包名写错（习惯性写 `dig`/`bind-tools`），或删包时没同步改断言         |
+| `/etc/apk/repositories` 不是 2 行               | 换源时重写了整份文件、少写 `main` 或 `community`，或多了空行          |
+| `curl`/`drill`/`git`/`nc`/`nslookup` 缺失       | 包名写错（习惯性写 `dig`/`bind-tools`），或删包时没同步改断言         |
 | OCI 标签 `version` 与 `${STAMP}` 不符           | `--build-arg IMAGE_VERSION` 没传到，或 Dockerfile 的 `ARG` 没重新声明 |
 
 修好后重跑即可：同名版本标签会被覆盖。不需要手工删标签——它本来就不是留档用的。

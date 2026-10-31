@@ -36,7 +36,7 @@
 
 | 层     | 负责                                               | 不负责                   |
 |--------|----------------------------------------------------|--------------------------|
-| 触发层 | 决定「什么时候构建」：按钮、定时、tag、push、PR    | 构建细节、标签命名       |
+| 触发层 | 决定「什么时候构建」：按钮、定时                   | 构建细节、标签命名       |
 | 构建层 | 决定「构建出什么」：基础版本、源、包、标签、元数据 | 何时触发、权限、按钮展示 |
 | 产物层 | 存储与分发镜像与元数据                             | 内容正确性、漏洞修复     |
 
@@ -89,7 +89,7 @@ Dockerfile 放在 `.cnb/docker/` 而不是根目录，是为了让 `.cnb/` 自�
 1. **校验与解析**：`version` 只接受 `空|latest|3.25|3.25.1|3.25.1@sha256:<64hex>`；再起一个一次性容器读 `/etc/alpine-release` 得到 `ALPINE_REAL`（如 `3.25.1`），并从 `imagetools` 取基座 index digest `BASE_DIGEST`。**标签里永远不出现 `latest`**。
 2. **一次多架构构建**：`--platform linux/amd64,linux/arm64 --push`，只打 `-t ${IMAGE}:${STAMP}`（`STAMP=${ALPINE_REAL}`，标签不带日期）。刻意不挂 registry 缓存（理由见 CI 流水线那节），并 `--provenance=mode=min --sbom=false`，让 index 形状只由两个平台清单决定。
 3. **派生单平台标签**：`docker buildx imagetools create` 把 index 里该平台条目的 digest 挂到 `${STAMP}-linux-amd64` / `-linux-arm64`。这一步不执行构建，digest 与 index 条目完全相同。
-4. **冒烟测试（amd64）**：先 `docker pull` 再起容器，断言 `/etc/alpine-release` 前缀等于 `ALPINE_REAL`、`/etc/timezone`、`date +%z`、`/etc/apk/repositories` 行数、四个命令可执行，并核对 OCI 标签 `version` 等于 `${STAMP}`。
+4. **冒烟测试（amd64）**：先 `docker pull` 再起容器，断言 `/etc/alpine-release` 前缀等于 `ALPINE_REAL`、`/etc/timezone`、`date +%z`、`/etc/apk/repositories` 行数、五个命令可执行，并核对 OCI 标签 `version` 等于 `${STAMP}`。
 5. **提升移动标签**：冒烟通过后 `imagetools create` 把 `${MINOR}` 与 `latest` 指向 `${STAMP}`；失败则 `exit 1`，两个移动标签留在上一份可用产物上。
 6. **汇总元数据**：`imagetools inspect` 取 index digest 与各平台镜像清单里的层体积，连同 `alpine_version`、`base_digest`、两个时间戳写成 `.cnb/annotation.json`，由 `cnbcool/annotations` 写入 commit 元数据。细节见[构建元数据](metadata-and-badges.md)。
 

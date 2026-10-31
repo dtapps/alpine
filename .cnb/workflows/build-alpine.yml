@@ -4,6 +4,9 @@
   # 两个单平台标签从这份 manifest 派生。基座默认 alpine:latest（每天跟上游），
   # 脚本解析出实际版本后直接用它当标签（同名标签每天覆盖），latest / minor 在冒烟
   # 通过后按 digest 提升；要钉住某次产物请用元数据里记录的 digest。
+  #
+  # 下游：build-chromium.yml 的基座就是这里产出的 latest / <version>，所以
+  # 定时任务（00:05）必须早于 Chromium 的 01:05（间隔 1 小时），且 latest 提升必须在冒烟之后。
   # https://cnb.cool/loviselu/docker-buildx-multi-platform-example
   # https://cnb.cool/examples/ecosystem/docker-buildx-multi-platform-example
   web_trigger_build_alpine:
@@ -38,52 +41,3 @@
             type: ADD
             fromJsonFile: .cnb/annotation.json
 
-  # PR 校验：不推送，只证明「这份 Dockerfile 能构建、容器能起来」。
-  # 只对真正改到 alpine 构建输入的 PR 生效，纯文档 PR 直接跳过：
-  # 否则改一行 README 也要等一次多分钟的多架构构建。
-  pull_request:
-    - name: validate-alpine
-      runner:
-        tags: cnb:arch:amd64
-      services:
-        - docker
-      stages:
-        - name: 构建（不推送）与冒烟
-          script: |
-            set -eu
-            # 判断本次 PR 是否触及 alpine 的构建输入；判断不出来时按「要校验」处理
-            changed=""
-            if [ -n "${CNB_TARGET_BRANCH:-}" ] \
-              && git rev-parse --verify "origin/${CNB_TARGET_BRANCH}" >/dev/null 2>&1; then
-              changed="$(git diff --name-only "origin/${CNB_TARGET_BRANCH}...HEAD" 2>/dev/null || true)"
-            elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
-              changed="$(git diff --name-only HEAD~1 2>/dev/null || true)"
-            fi
-            case "${changed}" in
-              *.cnb/docker/Dockerfile.alpine* | *.cnb/scripts/build-alpine.sh* | *.cnb/workflows/build-alpine.yml*)
-                echo "变更涉及 alpine 构建输入，开始校验"
-                ;;
-              "")
-                echo "无法确定变更范围，默认执行校验"
-                ;;
-              *)
-                echo "变更不涉及 alpine 构建输入，跳过校验："
-                printf '%s\n' "${changed}"
-                exit 0
-                ;;
-            esac
-            # 不传 ALPINE_VERSION，验证的就是 Dockerfile 里的默认值，
-            # 免得 PR 改了默认值却仍按旧值校验。
-            docker buildx build --platform linux/amd64 --load --pull \
-              -f .cnb/docker/Dockerfile.alpine -t alpine:pr . || exit 1
-            # 1) 基座版本有输出、时区正确、源行数对、四个命令可执行
-            docker run --rm alpine:pr sh -eu -c '
-              [ -n "$(cat /etc/alpine-release)" ]
-              [ "$(cat /etc/timezone)" = "Asia/Shanghai" ]
-              [ "$(date +%z)" = "+0800" ]
-              [ "$(wc -l </etc/apk/repositories)" -eq 4 ]
-              for b in curl drill nc nslookup; do
-                command -v "$b" >/dev/null 2>&1
-              done
-              printf "SMOKE_OK"
-            ' | grep -q 'SMOKE_OK' || exit 1

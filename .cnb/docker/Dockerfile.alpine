@@ -41,7 +41,7 @@ LABEL org.opencontainers.image.source="${IMAGE_SOURCE}" \
     org.opencontainers.image.revision="${VCS_REF}" \
     org.opencontainers.image.created="${BUILD_DATE}" \
     org.opencontainers.image.version="${IMAGE_VERSION}" \
-    org.opencontainers.image.description="Alpine 基础镜像：ca-certificates + curl + drill + nc + Asia/Shanghai 时区" \
+    org.opencontainers.image.description="Alpine 基础镜像：ca-certificates + curl + drill + git + nc + Asia/Shanghai 时区" \
     org.opencontainers.image.licenses="MIT" \
     org.opencontainers.image.base.name="alpine:${ALPINE_VERSION}" \
     org.opencontainers.image.base.digest="${BASE_DIGEST}"
@@ -71,21 +71,16 @@ USER root
 #   - apk add --no-cache 自带索引拉取，不需要 apk update（省一整轮索引下载）
 #   - 清理必须与安装同层：跨层 rm 只产生 whiteout，旧层数据照样随镜像分发
 #   - 包名按字母序，便于 diff 与评审
-#   - 只保留 main 源：本层所有包都在 main；community 索引约 2.4 MiB，默认白拉
-#   - 仓库路径由容器内 /etc/alpine-release 推导，基座升小版本时无需改这里
+#   - 换源只替换主机名：保留基座自带的 main + community 两行，上游增删
+#     仓库时不用跟着改；主机名匹配不上时 sed 不生效，仍走官方源且构建成功
 # -------------------------------------------------------------------
 RUN set -eux; \
-    alpine_ver="$(cut -d. -f1,2 /etc/alpine-release)"; \
-    printf '%s\n' \
-        "https://mirrors.cernet.edu.cn/alpine/v${alpine_ver}/main" \
-        "https://mirrors.cloud.tencent.com/alpine/v${alpine_ver}/main" \
-        "https://mirrors.aliyun.com/alpine/v${alpine_ver}/main" \
-        "https://dl-cdn.alpinelinux.org/alpine/v${alpine_ver}/main" \
-        >/etc/apk/repositories; \
+    sed -i 's@dl-cdn.alpinelinux.org@mirrors.cloud.tencent.com@g' /etc/apk/repositories; \
     apk add --no-cache \
         ca-certificates \
         curl \
         drill \
+        git \
         netcat-openbsd \
         tzdata; \
     ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime; \
@@ -97,11 +92,11 @@ RUN set -eux; \
 #   ca-certificates  0.20 MiB / 0.20  HTTPS 校验基础，curl 与下游都依赖
 #   curl             0.27 MiB / 5.06  含 libunistring、brotli、zstd、libcurl 等传递依赖
 #   drill            0.06 MiB / 0.40  DNS 排查（dig 的轻量替代，省 6.6 MiB）
+#   git              6.71 MiB / 7.63  克隆代码、拉取依赖（含 libexpat、pcre2）
 #   netcat-openbsd   0.04 MiB / 0.16  端口探活 nc -zv（busybox 的 nc 不支持 -z）
 #   tzdata           0.43 MiB / 0.43  Asia/Shanghai 时区数据
 #
 # 需要真正的 dig 语法与输出：把 drill 换成 bind-tools（多 6.6 MiB，闭包 17 个包）
 # 只需要「能不能解析」：删掉 drill，用 busybox 自带的 nslookup（再省 0.4 MiB）
-# 需要 community 里的包：在 /etc/apk/repositories 追加
-#   https://mirrors.aliyun.com/alpine/v${alpine_ver}/community
+# 需要 community 里的包：基座自带的 repositories 已含 community，直接 apk add
 # ===================================================================

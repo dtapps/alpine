@@ -30,7 +30,7 @@
 - 标签里的版本号不是手写的，也不是 `latest`：脚本先起一个一次性容器读 `/etc/alpine-release`，把 `alpine:latest` 解析成 `3.25.1` 这种确定值。所以 `latest` 天天动，而 `3.25.1` 这个标签反映的是「当前同版本产物」，重建会被覆盖。
 - **同名标签每天被覆盖是刻意的**：alpine 的版本号就是产品的版本号，再叠一层日期只会让下游不知道该固定哪一个。代价是「昨天那份」没有标签可指——要固定某一次构建，只能按 digest 拉取，见下文「按 digest 固定拉取」。
 - `3.25.1-linux-*` 同样每天被覆盖，它只解决「只认单平台标签的工具」，不承担留档职责。
-- `3.25` 与 `latest` 是提升出来的，且必须等冒烟测试通过：测试项是容器内 `/etc/alpine-release` 前缀等于解析出的版本、`/etc/timezone` 为 `Asia/Shanghai`、`date +%z` 为 `+0800`、`/etc/apk/repositories` 恰好 4 行、`curl`/`drill`/`nc`/`nslookup` 四个命令可执行、OCI 标签 `version` 等于本次版本标签名。任一项失败脚本 `exit 1`，`3.25` 与 `latest` 停在原地。
+- `3.25` 与 `latest` 是提升出来的，且必须等冒烟测试通过：测试项是容器内 `/etc/alpine-release` 前缀等于解析出的版本、`/etc/timezone` 为 `Asia/Shanghai`、`date +%z` 为 `+0800`、`/etc/apk/repositories` 恰好 2 行、`curl`/`drill`/`git`/`nc`/`nslookup` 五个命令可执行、OCI 标签 `version` 等于本次版本标签名。任一项失败脚本 `exit 1`，`3.25` 与 `latest` 停在原地。
 - 冒烟失败时 `3.25.1` 这个标签已经指向那份坏产物了（构建阶段就推了），但它不是给下游消费的名字：按 `3.25` 或 `latest` 拉取的人不受影响，下一次成功构建会把 `3.25.1` 覆盖回来。
 - 定时任务不传 `version`，于是走 `Dockerfile` 里的 `ARG ALPINE_VERSION=latest`：每天 00:05 那次构建跟随上游最新稳定版，包级补丁与新小版本都自动带上。
 

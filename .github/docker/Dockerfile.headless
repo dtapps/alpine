@@ -12,13 +12,12 @@
 #
 # 这是 .cnb/docker/Dockerfile.headless 的 GitHub 侧副本：两个平台有意各留一份，
 # 不互相引用；改默认参数时两处都要改。
-# 构建（由 .github/scripts/build-chromium.sh 自动完成，本地等价命令）：
+# CI 不再发布该变体，下面是本地/下游构建命令：
 #   docker build -f .github/docker/Dockerfile.headless \
 #     --build-arg BASE_IMAGE=alpine-chromium:local -t alpine-chromium:local-headless .
 # ===================================================================
-# 默认值只用于本地手动构建；CI 用同批次 default 镜像的 digest 覆盖（build-chromium.sh
-# 显式传 --build-arg BASE_IMAGE=${IMAGE}@${BASE_DIGEST}）。本地构建需自行传
-# --build-arg IMAGE_SOURCE 与 BASE_IMAGE。
+# 默认值只用于本地/下游手动构建：先构建或拉取 default 镜像，再用
+# --build-arg BASE_IMAGE=<image>:<alpine 版本> 指向它。
 ARG IMAGE_SOURCE=https://github.com/dtapps/alpine
 ARG BASE_IMAGE=${IMAGE_SOURCE}/chromium:latest
 FROM ${BASE_IMAGE}

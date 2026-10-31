@@ -1,14 +1,15 @@
 # Dockerfile 解析
 
-> 两个 Dockerfile：主文件产出中性基座（换源 → 装包 → 环境变量 → 预置用户 → OCI 标签），`Dockerfile.headless` 在它之上叠一层，把默认无头参数与 tini 固化。每一段都对应一个具体的失败模式。
+> 发布用的 Dockerfile 只有一个：在本仓库的 Alpine 基础镜像上产出中性镜像（CNB 侧先换源，再装包 → 环境变量 → 预置用户 → OCI 标签）。`Dockerfile.headless` 是留给本地/下游的派生配方，CI 不发布。每一段都对应一个具体的失败模式。GitHub 侧不换源，没有换源层，其余步骤相同。
 
 ## 结构总览
 
 ```text
 ARG ALPINE_VERSION=latest        → 构建参数：Alpine 版本（不是 Chromium 版本），默认跟随上游
-FROM alpine:${ALPINE_VERSION}    → 官方 Alpine
-RUN  换源                          → 第 1 层：改写 /etc/apk/repositories
-RUN  装包 + 时区 + 字体缓存 + 版本断言 + 同层清理 → 第 2 层：体积全在这里
+ARG CHROMIUM_BASE_IMAGE=alpine:${ALPINE_VERSION} → 基座引用：CI 传本仓库 Alpine 基础镜像的 digest
+FROM ${CHROMIUM_BASE_IMAGE}      → 本仓库 Alpine 基础镜像（默认回落官方 alpine）
+RUN  换源（仅 CNB）                → 第 1 层：把 /etc/apk/repositories 的主机名换成腾讯云
+RUN  装包 + 时区 + 字体缓存 + 版本断言 + 同层清理 → 第 2 层（GitHub 为第 1 层）：体积全在这里
 ENV  TZ / LANG / LC_ALL           → 环境变量：不占层体积
 ENV  CHROME_BIN / PUPPETEER_*     → 环境变量：给下游工具链用
 RUN  adduser chrome + /work       → 第 3 层：预置非 root 用户与挂载点
@@ -16,20 +17,29 @@ WORKDIR /work
 LABEL …                           → OCI 元数据：不占层体积
 ```
 
-`Dockerfile.headless` 再叠两层：`ENV CHROMIUM_USER_FLAGS` + `ENTRYPOINT ["/sbin/tini","--"]`。
+`Dockerfile.headless`（仅本地/下游派生，CI 不发布）再叠两层：`ENV CHROMIUM_USER_FLAGS` + `ENTRYPOINT ["/sbin/tini","--"]`。
 
 镜像会到「数百 MB」量级，这是 Chromium 的依赖闭包带来的：Alpine 3.24 上 `apk add chromium` 实测 **184 个包 / 761 MiB installed**。具体数字看 commit 元数据里的 `chromium_image_size`（见 [构建元数据](metadata-and-badges.md)）。
 
-## ARG ALPINE_VERSION：默认跟随上游，可钉具体版本
+## ARG：Alpine 版本与基座引用
 
 ```dockerfile
 ARG ALPINE_VERSION=latest
-FROM alpine:${ALPINE_VERSION}
+ARG CHROMIUM_BASE_IMAGE=alpine:${ALPINE_VERSION}
+FROM ${CHROMIUM_BASE_IMAGE}
+
+# FROM 之前声明的 ARG 在构建阶段不可见，必须重新声明才能用于 LABEL
+ARG ALPINE_VERSION
+ARG CHROMIUM_BASE_NAME=alpine:${ALPINE_VERSION}
+ARG CHROMIUM_BASE_DIGEST=unknown
 ```
 
-- 声明在 `FROM` **之前**才能被 `FROM` 引用；写在后面就只能给 `RUN` 用。
-- 默认 `latest`，跟随上游最新稳定版；定时任务每天重建自动吃到新补丁。需要复现某次构建时，显式钉具体补丁版本（如 `--build-arg ALPINE_VERSION=3.24.3`）。
+- `ALPINE_VERSION` 声明在 `FROM` **之前**才能被引用；默认 `latest`，跟随上游最新稳定版。本地构建时它决定官方基座 `alpine:<版本>`；CI 里由脚本传解析出的实际版本（如 `3.24.3`），用来写 OCI 标签，选基座标签则由 `version` 入参负责。
+- `CHROMIUM_BASE_IMAGE` 是实际 `FROM` 的引用。CI 传入本仓库 Alpine 基础镜像的 digest 形式（`<仓库 slug>:<version>@sha256:<digest>`），解析不到就失败；默认值 `alpine:${ALPINE_VERSION}` 只用于本地独立构建，让 Dockerfile 不依赖私有制品库也能构建。
+- `FROM` 之后必须重新声明 `ALPINE_VERSION`，否则构建阶段的 `LABEL org.opencontainers.image.version` 拿到空值；`CHROMIUM_BASE_NAME` / `CHROMIUM_BASE_DIGEST` 只用于 OCI 的 `base.name` / `base.digest`。
 - 这个参数是 **Alpine 版本**，不是 Chromium 版本。Chromium 装哪个由该分支的软件包仓库决定。
+
+CNB 基座（本仓库 Alpine 基础镜像）已经把源的主机名换成腾讯云，`main` + `community` 两行都在；Chromium 的 STEP 1 再做一次同样的 `sed`，基座已换过时是幂等的，直接用官方 `alpine` 本地构建时则把主机名换过来。GitHub 基座从官方 `alpine` 继承的源本来就是 `main` + `community`，所以 GitHub 侧没有 STEP 1，后续步骤的编号整体比 CNB 侧少一位。
 
 关键机制：`chromium` 在 **community** 仓库，而 Alpine 的 community 只维护到「下一个 stable 发布」。所以每个分支的 Chromium 会**冻住**：
 
@@ -46,20 +56,24 @@ FROM alpine:${ALPINE_VERSION}
 `apk` 装的 chromium **无法钉版本**——同一分支只保留最新一个 `-rN`，钉死 `chromium=155.0.8059.84-r0` 会在 `-r1` 发布当天构建失败。所以：
 
 - 钉 **Alpine 分支/补丁版本**；
-- 用 `EXPECTED_CHROMIUM_MAJOR` 断言主版本，漂移时构建直接失败；
+- 可选地用 `EXPECTED_CHROMIUM_MAJOR` 断言主版本（默认空 = 不校验），填了值时漂移会让构建失败；
 - 把实际版本写进 `/usr/share/alpine-chromium/VERSION` 与 CI 元数据的 `chromium_version`。
 
-需要字节级复现时，把 `FROM` 换成 digest 形式：
+需要位级复现时，把基座引用换成 digest 形式（CI 每次构建都是这么做的）：
 
-```dockerfile
-FROM alpine:3.24.3@sha256:<digest>
+```bash
+--build-arg CHROMIUM_BASE_IMAGE=docker.cnb.cool/dtapp/alpine:3.24.3@sha256:<digest> \
+--build-arg CHROMIUM_BASE_NAME=docker.cnb.cool/dtapp/alpine:3.24.3 \
+--build-arg CHROMIUM_BASE_DIGEST=sha256:<digest>
 ```
 
-本地覆盖版本：
+本地覆盖版本（默认基座是官方 alpine）：
 
 ```bash
 docker build -f .cnb/docker/Dockerfile.chromium --build-arg ALPINE_VERSION=3.24.3 -t alpine-chromium:local .
 ```
+
+要以本仓库基座构建，额外传上面三个 `CHROMIUM_BASE_*` 参数；取 digest 与完整示例见 [构建](build.md)。
 
 构建老分支时要一起改断言，否则会被拦下：
 
@@ -69,24 +83,20 @@ docker build -f .cnb/docker/Dockerfile.chromium \
   -t alpine-chromium:local .
 ```
 
-## STEP 1：换源
+## STEP 1：换源（仅 CNB）
 
 ```dockerfile
-RUN ALPINE_VER=$(cut -d. -f1,2 /etc/alpine-release) \
-    && printf '%s\n' \
-        "https://mirrors.cernet.edu.cn/alpine/v${ALPINE_VER}/main" \
-        "https://mirrors.cernet.edu.cn/alpine/v${ALPINE_VER}/community" \
-        "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/main" \
-        "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/community" \
-        >/etc/apk/repositories
+RUN sed -i 's@dl-cdn.alpinelinux.org@mirrors.cloud.tencent.com@g' /etc/apk/repositories
 ```
 
-| 写法                                     | 为什么                                                                                            |
-|------------------------------------------|---------------------------------------------------------------------------------------------------|
-| `cut -d. -f1,2` 取 `/etc/alpine-release` | 文件是 `3.24.3`，仓库路径只要 `v3.24`；用标签拼不出 URL                                           |
-| `printf` + `>` 覆写                      | 一次性写出完整源列表，不残留基础镜像自带的官方源                                                  |
-| 只留两组（国内镜像 + 官方兜底）          | 原先五站十行会让 apk 在不同同步进度的仓库间混用，容易撞依赖版本冲突，也多打好几次网络请求         |
-| 不再单独 `apk update`                    | `apk add --no-cache` 自己会拉索引；源不可达会在装包层立刻报错，多一个 update 层只是多一次索引下载 |
+| 写法                  | 为什么                                                                                            |
+|-----------------------|---------------------------------------------------------------------------------------------------|
+| `sed` 只换主机名      | 保留基座自带的 `main` + `community` 两行；`chromium` 在 community，两行都不能少                   |
+| 不写源列表            | 版本路径与仓库结构由上游维护，本仓库不用抄一份、也不用跟着上游改                                  |
+| 主机名不匹配时跳过    | `sed` 不生效，文件保持官方源，构建仍能完成——国内构建变慢，但不会因为换源失败而中断                |
+| 不再单独 `apk update` | `apk add --no-cache` 自己会拉索引；源不可达会在装包层立刻报错，多一个 update 层只是多一次索引下载 |
+
+GitHub 侧没有这一段：官方源在境外最快，基座默认的 `repositories` 已经包含 `main` + `community`，`apk add chromium` 直接可用。
 
 ## STEP 2：包清单与版本断言
 
@@ -97,7 +107,7 @@ RUN echo "cache-bust: ${CACHE_BUST}" \
     …
 ```
 
-（文件里为了 diff 可读是一个包一行；`if` 用来挂变体依赖。）
+（文件里为了 diff 可读是一个包一行；`if` 用来挂 `WITH_CJK` 这个本地/下游开关，CI 不传它。）
 
 只显式要 6 个包，其余 9 个由 `chromium` 的 `so:` 依赖自动带入：
 
@@ -111,6 +121,8 @@ RUN echo "cache-bust: ${CACHE_BUST}" \
 | `tini`            | PID 1 收尸 + 信号转发，23 KiB                            | 否                               |
 
 自动带入、不再逐行声明的 9 个：`glib`、`pango`、`gdk-pixbuf`、`gtk+3.0`、`nss`、`freetype`、`harfbuzz`、`libstdc++`、`fontconfig`。**它们不是被删掉的依赖**，而是 `apk` 本来就会装：显式写出来不增体积，删掉也不减体积。
+
+另外，`ca-certificates` 与 `tzdata` 基座已经装过；这里仍显式列出，保证用默认官方基座独立构建时也成立，重复安装是幂等的。`curl`、`drill`、`netcat-openbsd` 不在本层安装，是从基座继承的。
 
 > `fontconfig` 在上面两个清单里各出现一次，不是笔误：它确实在闭包内，显式写出来是为了把「字体发现与匹配是必需能力」标进依赖声明，而不是默认它能一直被间接带入。
 
@@ -130,7 +142,7 @@ RUN echo "cache-bust: ${CACHE_BUST}" \
 
 `font-freefont` **不含任何 CJK 字形**：实测 12 个 `.otf` 的 `cmap` 里汉字/假名/谚文码位全部为 0，Chromium 自动带入的 `font-opensans` 也没有。所以主镜像渲染中文**一定是豆腐块**，不是「覆盖有限」。
 
-要中文就构建 `-cjk` 变体（`WITH_CJK=1`，装 `font-noto-cjk`，+88.8 MiB）；只做简体截图的下游可以自己换更省的 `font-wqy-zenhei`（16.3 MiB，本仓库未内置）。
+要中文就自己构建（`--build-arg WITH_CJK=1`，装 `font-noto-cjk`，+88.8 MiB）；CI 不发布带字体的标签。只做简体截图的下游可以自己换更省的 `font-wqy-zenhei`（16.3 MiB，本仓库未内置）。
 
 ```bash
 docker run --rm alpine-chromium:local-cjk sh -c 'fc-list :lang=zh | head -3'
@@ -204,23 +216,25 @@ LABEL org.opencontainers.image.title="alpine-chromium" \
       org.opencontainers.image.version="${ALPINE_VERSION}" \
       org.opencontainers.image.revision="${BUILD_REVISION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
-      org.opencontainers.image.base.name="docker.io/library/alpine:${ALPINE_VERSION}" \
+      org.opencontainers.image.base.name="${CHROMIUM_BASE_NAME}" \
+      org.opencontainers.image.base.digest="${CHROMIUM_BASE_DIGEST}" \
       dev.alpine-chromium.cjk="${WITH_CJK}"
 ```
 
-`created` / `revision` 由 CI 传 `--build-arg`，本地直接 `docker build` 时是 `unknown`。Chromium 的精确版本放不进 `LABEL`（构建期拿不到），所以落在 `/usr/share/alpine-chromium/VERSION`，并由 CI 写进 commit 元数据。
+`base.name` 在本地默认构建时是 `alpine:${ALPINE_VERSION}`，CI 里换成实际的基座引用（`<仓库 slug>:<version>`）；`base.digest` 是当次基座 index 的 digest，把「用的是哪一份基座」钉住。`created` / `revision` 由 CI 传 `--build-arg`，本地直接 `docker build` 时是 `unknown`。Chromium 的精确版本放不进 `LABEL`（构建期拿不到），所以落在 `/usr/share/alpine-chromium/VERSION`，并由 CI 写进 commit 元数据。
 
-## 变体：同一份 Dockerfile 的三副面孔
+## 可选派生：本地/下游的开关
 
-| 变体        | 开关                           | 差异                                                                                          | 代价             |
-|-------------|--------------------------------|-----------------------------------------------------------------------------------------------|------------------|
-| default     | —                              | 中性基座，不含任何启动参数                                                                    | —                |
-| `-cjk`      | `WITH_CJK=1`                   | 多 `font-noto-cjk`                                                                            | +88.8 MiB        |
-| `-headless` | 独立文件 `Dockerfile.headless` | `ENV CHROMIUM_USER_FLAGS` + `ENTRYPOINT ["/sbin/tini","--"]` + `CMD ["chromium","--version"]` | ≈0（共用基础层） |
+CI 只发布一个中性镜像，`Dockerfile` 里仍保留几个开关供本地或下游派生：
 
-另外两个按需开关不进默认构建：`WITH_CHROMEDRIVER=1`（+17.5～28.4 MiB，配 Selenium）、`WITH_SWIFTSHADER=1`（+约 5 MiB，要 WebGL/Canvas）。
+| 目标                | 开关                           | 差异                                                                                          | 代价             |
+|---------------------|--------------------------------|-----------------------------------------------------------------------------------------------|------------------|
+| 带中文字体          | `WITH_CJK=1`                   | 多 `font-noto-cjk`                                                                            | +88.8 MiB        |
+| 内置无头参数 + tini | 独立文件 `Dockerfile.headless` | `ENV CHROMIUM_USER_FLAGS` + `ENTRYPOINT ["/sbin/tini","--"]` + `CMD ["chromium","--version"]` | ≈0（共用基础层） |
+| 配 Selenium         | `WITH_CHROMEDRIVER=1`          | 多装 chromedriver                                                                             | +17.5～28.4 MiB  |
+| 要 WebGL / Canvas   | `WITH_SWIFTSHADER=1`           | 多装 `chromium-swiftshader`                                                                   | 约 5 MiB         |
 
-变体策略的理由：`-cjk` 只是多装一个包，用构建参数就够；`-headless` 要改 `ENTRYPOINT`/`CMD`，而这两个指令无法用 `ARG` 条件化，所以单独一份很短的 Dockerfile，`FROM` 同一批次的 default 镜像（CI 里用 digest 钉住）。
+这些开关都不进 CI 的发布契约：`-cjk` 只是多装一个包，用构建参数就够；`-headless` 要改 `ENTRYPOINT`/`CMD`，而这两个指令无法用 `ARG` 条件化，所以单独一份很短的 Dockerfile，由下游 `FROM` 已发布的 chromium 镜像叠一层。
 
 ## 无头启动参数为什么不写进主镜像
 
@@ -245,7 +259,7 @@ docker run --rm --init --shm-size=1g \
 - `--disable-gpu` 在新版无头下基本冗余；要 WebGL/Canvas 就装 `chromium-swiftshader` 并去掉它。
 - root + root 属主 HOME 时包装脚本会强塞 `--user-data-dir=$HOME/.config/chromium`，并发实例会撞 `SingletonLock`——显式传 `--user-data-dir=/tmp/xxx`。
 
-想彻底省掉这串参数就用 `-headless` 变体（它已内置同样的值 + tini 当 PID 1 + 独立的 `--user-data-dir`），要清空默认值用 `-e CHROMIUM_USER_FLAGS=""`。
+想彻底省掉这串参数就用 `Dockerfile.headless` 自行派生一个镜像（它已内置同样的值 + tini 当 PID 1 + 独立的 `--user-data-dir`），要清空默认值用 `-e CHROMIUM_USER_FLAGS=""`。
 
 ## root 用户这一取舍
 
@@ -284,11 +298,12 @@ docker run --rm alpine-chromium:local sh -c \
   'cat /etc/apk/repositories; chromium --version; date +%Z; echo $CHROME_BIN'
 docker run --rm alpine-chromium:local sh -c \
   'cat /etc/timezone; readlink -f /etc/localtime; ls -l /usr/bin/chromium'
+docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.base.name"}}' alpine-chromium:local
 docker run --rm --shm-size=1g alpine-chromium:local \
   chromium --headless --no-sandbox --disable-dev-shm-usage --dump-dom about:blank
 ```
 
-最后一条是渲染冒烟：不进网络、不写文件，能打印出 `about:blank` 的 DOM 就说明浏览器本体与图形依赖都还在。动了字体就再验一次 `fc-list :lang=zh`（`-cjk` 变体）。
+基座标签那条命令：本地默认构建应输出 `alpine:latest`（或你传入的 `ALPINE_VERSION`），从 CI 产物里看应是 `<仓库 slug>:<alpine 版本>`。最后一条是渲染冒烟：不进网络、不写文件，能打印出 `about:blank` 的 DOM 就说明浏览器本体与图形依赖都还在。动了字体就再验一次 `fc-list :lang=zh`（自建 `WITH_CJK=1` 镜像）。
 
 Dockerfile 由 `dockerfmt` 格式化，改完跑 `make format-docker`；CI 不校验格式，但 diff 里的格式噪音会拖慢评审（见 [格式化](formatting.md)）。
 

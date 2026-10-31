@@ -40,26 +40,28 @@ GitHub 侧不 `source` CNB 的脚本，也不与 CNB 共用 Dockerfile。两个�
 # 基础镜像
 docker run --rm -it ghcr.io/dtapps/alpine:latest sh
 
-# Chromium（三个变体：latest / latest-cjk / latest-headless）
+# Chromium（与 Alpine 基座同一套 5 标签契约）
 docker run --rm ghcr.io/dtapps/alpine/chromium:latest chromium --version
 ```
 
-标签契约与 CNB 完全一致：`<alpine 版本>`、`<major.minor>`、`latest`，加上 `<base>[-cjk|-headless][-linux-<arch>]` 派生形式，详见 [Alpine 镜像与标签](alpine/images-and-tags.md) 与 [Chromium 镜像与标签](chromium/images-and-tags.md)。两个平台各自构建、各自解析基座，**digest 不通用**，不要跨平台比对。
+标签契约与 CNB 完全一致：`<alpine 版本>`、`<major.minor>`、`latest`，加上 `<alpine 版本>-linux-{amd64,arm64}` 派生形式，详见 [Alpine 镜像与标签](alpine/images-and-tags.md) 与 [Chromium 镜像与标签](chromium/images-and-tags.md)。`-cjk` / `-headless` 不再发布，需要时用 `WITH_CJK=1` / `Dockerfile.headless` 自行派生。
+
+GitHub 侧 Chromium 的基座就是这里产出的 `ghcr.io/<owner>/<repo>`：`build-chromium.sh` 按 `version` 找到同名基座标签，再用 `imagetools inspect` 取 digest 钉进构建。所以两个平台都只解析**自己 registry 里**的基座，**digest 不通用**，不要跨平台比对；fork 后 Chromium 找的也是 fork 自己 namespace 下的基座，不会借用 `dtapps` 的产物。
 
 ## 触发矩阵
 
-| 事件                | build-alpine.yml                                 | build-chromium.yml                              | 行为                                                             |
-|---------------------|--------------------------------------------------|-------------------------------------------------|------------------------------------------------------------------|
-| `schedule`          | 每天 `16:35 UTC`（= 00:35 Asia/Shanghai）        | 每天 `18:00 UTC`（= 02:00 Asia/Shanghai）       | 跟随上游重建；比 CNB 的 00:05 / 01:30 各晚 30 分钟，两边互不等待 |
-| `workflow_dispatch` | 输入 `version`                                   | 输入 `version`、`expected_chromium_major`       | 手动构建，输入语义与 CNB 按钮完全一致                            |
-| `push` 到 `main`    | 改到 `.github/docker/Dockerfile.alpine` 等输入时 | 改到 chromium / headless 的 Dockerfile 或脚本时 | 自动重建，改文档不触发                                           |
-| `pull_request`      | 同上路径过滤                                     | 同上路径过滤                                    | 只构建、不推送：alpine 验时区/源/命令，chromium 验 default 变体  |
+| 事件                | build-alpine.yml                          | build-chromium.yml                        | 行为                                                                                                                  |
+|---------------------|-------------------------------------------|-------------------------------------------|-----------------------------------------------------------------------------------------------------------------------|
+| `schedule`          | 每天 `16:35 UTC`（= 00:35 Asia/Shanghai） | 每天 `17:35 UTC`（= 01:35 Asia/Shanghai） | 跟随上游重建；Chromium 排在基座之后 1 小时（16:35 → 17:35 UTC）。跨平台互不等待，比 CNB 的 00:05 / 01:05 各晚 30 分钟 |
+| `workflow_dispatch` | 输入 `version`                            | 输入 `version`、`expected_chromium_major` | 手动构建，输入语义与 CNB 按钮完全一致；Chromium 的 `version` 选的是 GHCR 上已有的基座标签                             |
 
 两个 workflow 都用 `concurrency: build-*-${{ github.ref }}` 串行化：定时与手动同时触发时排队，避免两条流水线并发改同一个 `latest` / `<minor>`。`cancel-in-progress: false`，不要改成 `true`——把正在推 manifest 的那次构建砍掉，会留下半套标签。
 
 ### 定时任务只认 UTC
 
-GitHub 的 `cron` 是 UTC，不会跟随仓库时区。所以北京时间 00:35 写成 `35 16 * * *`（前一天 16:35 UTC），02:00 写成 `0 18 * * *`。改时间时两处都要换算，别直接抄 CNB 的 `5 0 * * *` / `30 1 * * *`——那会在北京时间 08:05 / 09:30 跑。比 CNB 晚 30 分钟是刻意的：两个平台各自拉上游 `alpine` 镜像源，同一分钟开跑只会互相抢索引。
+GitHub 的 `cron` 是 UTC，不会跟随仓库时区。所以北京时间 00:35 写成 `35 16 * * *`（前一天 16:35 UTC），01:35 写成 `35 17 * * *`。改时间时两处都要换算，别直接抄 CNB 的 `5 0 * * *` / `5 1 * * *`——那会在北京时间 08:05 / 09:05 跑。
+
+两个时间差 1 小时是给基座留的缓冲：Chromium 的基座就是 16:35 那次 `build-alpine` 产出的 `latest`，间隔太小会在基座还没推完 manifest 时就去解析、直接报「找不到基座」，或者拿到上一批的旧 digest。跨平台比 CNB 各晚 30 分钟则是为了错开上游 `alpine` 索引拉取——两个平台的基座构建不在同一分钟抢同一批源。**只改一个时间时务必保持基座早于 Chromium**。
 
 另外三个平台限制：
 
@@ -71,19 +73,19 @@ GitHub 的 `cron` 是 UTC，不会跟随仓库时区。所以北京时间 00:35 
 
 脚本不读任何 `CNB_*`，也不需要 workflow 把镜像名拼好传进来：默认值从 Actions 内置变量派生，显式传同名变量即可覆盖（fork、本地复跑、试推）。唯一必须由 workflow 显式传的是 `REGISTRY_TOKEN`——`GITHUB_TOKEN` 不会自动进环境变量。
 
-| 变量                      | 默认来源 / workflow 传值                                         | 作用                                                  |
-|---------------------------|------------------------------------------------------------------|-------------------------------------------------------|
-| `REGISTRY_TOKEN`          | workflow：`${{ secrets.GITHUB_TOKEN }}`                          | `docker login` 密码；Actions 临时签发，仓库里不存凭证 |
-| `IMAGE`                   | `ghcr.io` + `GITHUB_REPOSITORY`（小写），chromium 加 `/chromium` | 目标镜像全名；可覆盖                                  |
-| `REGISTRY_USER`           | `GITHUB_ACTOR`                                                   | `docker login` 用户名；可覆盖                         |
-| `REVISION`                | `GITHUB_SHA`                                                     | 写进 OCI `revision` 标签；可覆盖                      |
-| `IMAGE_SOURCE`            | `https://github.com/<GITHUB_REPOSITORY>`                         | 写进 OCI `source` / `url`，GHCR 靠它挂回仓库；可覆盖  |
-| `version`                 | workflow：`${{ inputs.version }}`                                | 基座版本；定时/留空时跟随 Dockerfile 默认值           |
-| `expected_chromium_major` | workflow：`${{ inputs.expected_chromium_major }}`                | Chromium 主版本断言（仅 chromium）                    |
+| 变量                      | 默认来源 / workflow 传值                                         | 作用                                                                                 |
+|---------------------------|------------------------------------------------------------------|--------------------------------------------------------------------------------------|
+| `REGISTRY_TOKEN`          | workflow：`${{ secrets.GITHUB_TOKEN }}`                          | `docker login` 密码；Actions 临时签发，仓库里不存凭证                                |
+| `IMAGE`                   | `ghcr.io` + `GITHUB_REPOSITORY`（小写），chromium 加 `/chromium` | 目标镜像全名；可覆盖                                                                 |
+| `REGISTRY_USER`           | `GITHUB_ACTOR`                                                   | `docker login` 用户名；可覆盖                                                        |
+| `REVISION`                | `GITHUB_SHA`                                                     | 写进 OCI `revision` 标签；可覆盖                                                     |
+| `IMAGE_SOURCE`            | `https://github.com/<GITHUB_REPOSITORY>`                         | 写进 OCI `source` / `url`，GHCR 靠它挂回仓库；可覆盖                                 |
+| `version`                 | workflow：`${{ inputs.version }}`                                | 基座版本；chromium 用它定位 GHCR 上的同名基座标签，定时/留空时跟随 Dockerfile 默认值 |
+| `expected_chromium_major` | workflow：`${{ inputs.expected_chromium_major }}`                | Chromium 主版本断言（仅 chromium）                                                   |
 
-Dockerfile 里的 `ARG IMAGE_SOURCE=…`、`ARG BASE_IMAGE=…` 同理只是**本地手动构建的兜底默认值**，CI 会用派生出来的值覆盖，生产产物不依赖那两行字面量。
+Dockerfile 里的 `ARG IMAGE_SOURCE=…`、`ARG CHROMIUM_BASE_IMAGE=alpine:${ALPINE_VERSION}` 同理只是**本地手动构建的兜底默认值**：CI 的 Chromium 构建会把它换成 `ghcr.io/<owner>/<repo>:<version>@sha256:…`，并额外传 `CHROMIUM_BASE_NAME` / `CHROMIUM_BASE_DIGEST` 供 OCI 基座标签使用。这三个 `CHROMIUM_BASE_*` 不经过 workflow 输入，全部由 `build-chromium.sh` 解析后注入；要手动模拟 CI，直接给 `docker buildx build` 传同名 `--build-arg` 即可。
 
-脚本产物：`GITHUB_OUTPUT` 里写 `image_version` / `image_digest`（chromium 是 `chromium_version` / `chromium_image_digest`），并把完整元数据写进 `.github/annotation.json`（`.gitignore` 已排除），由 workflow 的 Step Summary 与 `upload-artifact` 消费。
+脚本产物：`GITHUB_OUTPUT` 里写 `image_version` / `image_digest`（chromium 是 `chromium_image_version` / `chromium_version` / `chromium_image_digest`），并把完整元数据写进 `.github/annotation.json`（`.gitignore` 已排除），由 workflow 的 Step Summary 与 `upload-artifact` 消费。
 
 ## 与 CNB 的实现差异
 
@@ -91,13 +93,13 @@ Dockerfile 里的 `ARG IMAGE_SOURCE=…`、`ARG BASE_IMAGE=…` 同理只是**�
 |----------|---------------------------------------------------|---------------------------------------------------------------------------|
 | 地址来源 | `CNB_DOCKER_REGISTRY` + `CNB_REPO_SLUG_LOWERCASE` | `ghcr.io` + `GITHUB_REPOSITORY`（小写）                                   |
 | builder  | `services: docker` 自带多架构 buildx              | `docker/setup-qemu-action` + `docker/setup-buildx-action` 现装            |
-| arm64    | runner 内置 binfmt                                | QEMU 模拟；chromium 三变体多架构因此要几十分钟（超时给到 240 分钟）       |
-| 层缓存   | Alpine 不用缓存；Chromium 用 registry cache       | Alpine 不用缓存；Chromium 用 GitHub Actions 缓存（`type=gha`，不占 GHCR） |
+| arm64    | runner 内置 binfmt                                | QEMU 模拟；chromium 多架构因此要几十分钟（超时给到 120 分钟）             |
+| 层缓存   | 两个镜像都不用 registry 缓存                      | Alpine 不用缓存；Chromium 用 GitHub Actions 缓存（`type=gha`，不占 GHCR） |
 | 元数据   | `.cnb/annotation.json` → commit annotation → 徽章 | `.github/annotation.json` → Step Summary + `upload-artifact`（留 30 天）  |
 | 磁盘     | 专用 runner                                       | hosted runner 约 14 GiB，chromium 构建前先删预装 SDK 腾空间               |
 | 权限     | 组织密钥仓库 `imports`                            | `permissions: packages: write` + `GITHUB_TOKEN`                           |
 
-关于 `type=gha` 缓存：它存在 Actions 缓存里，不往 GHCR 推 `buildcache*` 标签，所以 GHCR 上不会出现 CNB 制品库那种缓存标签。三个变体用独立的 `scope`（`alpine-chromium` / `-cjk` / `-headless`），避免互相当成缓存命中；`CACHE_BUST` 每天变化，保证上游 chromium 补丁进得来。
+关于 `type=gha` 缓存：它存在 Actions 缓存里，不往 GHCR 推 `buildcache*` 标签。Chromium 只有一个中性镜像，用单一 `scope`（`alpine-chromium`）；`CACHE_BUST` 每天变化，保证上游 chromium 补丁进得来。
 
 关于 Alpine 为什么不用缓存：它只有一个 `RUN`，命中缓存就等于不装包，每日重建的「刷新依赖」意义会消失（详见 [CNB 流水线](alpine/ci-pipeline.md) 的同名小节）。GitHub 侧沿用这个结论。
 
@@ -106,7 +108,7 @@ Dockerfile 里的 `ARG IMAGE_SOURCE=…`、`ARG BASE_IMAGE=…` 同理只是**�
 - workflow 里显式声明 `permissions: contents: read` + `packages: write`。仓库默认的 `GITHUB_TOKEN` 权限若是只读，推送会报 `denied: permission_denied`，这是第一个要检查的地方。
 - 包第一次被推送后，可见性由包自己的设置决定，**不会**自动跟随仓库可见性。需要匿名可拉时，去包页面（`https://github.com/users/<owner>/packages/container/alpine`；chromium 的包名是 `alpine/chromium`，URL 里写作 `alpine%2Fchromium`）把 visibility 改成 public。
 - `source` 标签指回仓库后，包会挂在仓库的 Packages 区，仓库权限也才能顺延到包上。
-- PR 来自 fork 时 `GITHUB_TOKEN` 只有只读权限，所以 PR 校验作业不登录、不推送，只做本地 `--load` 构建与冒烟。
+- 构建 workflow 只有 `schedule` 与 `workflow_dispatch` 两个触发；`push` / `pull_request` 不会自动构建，也没有 PR 校验作业，改完 Dockerfile 需手动触发或本地构建验证。
 - 组织仓库如果限制「Actions 创建包」（组织级 Packages 策略），首次推送会被拒；需要管理员放开，或改用有 `write:packages` 的个人访问令牌。
 
 ## 手动运行与排错
@@ -114,7 +116,9 @@ Dockerfile 里的 `ARG IMAGE_SOURCE=…`、`ARG BASE_IMAGE=…` 同理只是**�
 ```bash
 # 手动触发（等价于 CNB 的按钮）
 gh workflow run build-alpine.yml -f version=3.25.1
-gh workflow run build-chromium.yml -f version=3.24.3 -f expected_chromium_major=155
+# Chromium 的 version 必须对应一个已经存在的 GHCR 基座标签：
+# 先跑完上一条并等它推完，再跑这条；否则脚本报「找不到基座」并退出
+gh workflow run build-chromium.yml -f version=3.25.1 -f expected_chromium_major=155
 
 # 看运行状态与下载元数据
 gh run list --workflow=build-alpine.yml
@@ -122,16 +126,17 @@ gh run watch
 gh run download <run-id> -n alpine-annotation
 ```
 
-| 症状                           | 常见原因                                                            | 先看哪里                                 |
-|--------------------------------|---------------------------------------------------------------------|------------------------------------------|
-| `denied: permission_denied`    | 缺少 `packages: write`，或包已被别的仓库占用                        | workflow 的 `permissions`、包设置        |
-| arm64 阶段 `exec format error` | 少了 QEMU 步骤，或 `platforms: arm64` 没写                          | `setup-qemu-action` 那一步               |
-| `no space left on device`      | chromium 三变体 × 两平台的层缓存吃满 14 GiB                         | 「释放磁盘空间」步骤与 `df -h`           |
-| 定时任务不跑                   | cron 不是 UTC、不是默认分支、或仓库 60 天无提交被停用               | workflow 的 `on.schedule`                |
-| `latest` 没前进                | 冒烟失败（时区、源行数、命令缺失、OCI 标签），脚本在提升前 `exit 1` | 构建步骤日志的「冒烟测试失败」           |
-| chromium 构建在断言处失败      | 上游升了 Chromium 主版本，`EXPECTED_CHROMIUM_MAJOR` 不匹配          | 用 `expected_chromium_major` 覆盖        |
-| `toomanyrequests`              | Docker Hub 对匿名拉取限流（runner 是共享出口 IP）                   | 构建日志；换镜像源或配置 Docker Hub 凭证 |
-| GHCR 上找不到 `buildcache*`    | 预期行为：GitHub 用 Actions 缓存，不推 registry 缓存                | 无需处理                                 |
+| 症状                           | 常见原因                                                                        | 先看哪里                                              |
+|--------------------------------|---------------------------------------------------------------------------------|-------------------------------------------------------|
+| `denied: permission_denied`    | 缺少 `packages: write`，或包已被别的仓库占用                                    | workflow 的 `permissions`、包设置                     |
+| arm64 阶段 `exec format error` | 少了 QEMU 步骤，或 `platforms: arm64` 没写                                      | `setup-qemu-action` 那一步                            |
+| `no space left on device`      | chromium 两平台的层缓存与构建上下文吃满 14 GiB                                  | 「释放磁盘空间」步骤与 `df -h`                        |
+| 定时任务不跑                   | cron 不是 UTC、不是默认分支、或仓库 60 天无提交被停用                           | workflow 的 `on.schedule`                             |
+| `latest` 没前进                | 冒烟失败（时区、源行数、命令缺失、OCI 标签），脚本在提升前 `exit 1`             | 构建步骤日志的「冒烟测试失败」                        |
+| `找不到基座 ghcr.io/…`         | Chromium 构建早于基座、`version` 指向未构建的标签，或此时基座 manifest 还没推完 | 先跑 `build-alpine.yml`，确认 GHCR 上有该标签，再重试 |
+| chromium 构建在断言处失败      | 填了 `expected_chromium_major`，但上游升了 Chromium 主版本                      | 用新的主版本号覆盖，或传 `any` 跳过断言               |
+| `toomanyrequests`              | Docker Hub 对匿名拉取限流（runner 是共享出口 IP）                               | 构建日志；换镜像源或配置 Docker Hub 凭证              |
+| GHCR 上找不到 `buildcache*`    | 预期行为：GitHub 用 Actions 缓存，不推 registry 缓存                            | 无需处理                                              |
 
 ## 维护约定
 

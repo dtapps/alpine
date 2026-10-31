@@ -1,34 +1,44 @@
 # ===================================================================
-# Chromium 无头浏览器镜像（与 Alpine 基础镜像同仓库，各用自己的 Dockerfile）
+# Chromium 无头浏览器镜像：基于本仓库的 Alpine 基础镜像
 #
-#   本文件        → docker.cnb.cool/dtapp/alpine/chromium:latest[-cjk|-headless]
-#   Dockerfile    → docker.cnb.cool/dtapp/alpine:latest（Alpine 基础镜像，两者互不依赖）
+#   基座          → docker.cnb.cool/dtapp/alpine:<alpine 版本>（Alpine 基础镜像）
+#   本文件        → docker.cnb.cool/dtapp/alpine/chromium:<alpine 版本>
+#
+# 发布标签与 Alpine 基础镜像同一套契约：<alpine 版本> / <major.minor> / latest
+# 与 <alpine 版本>-linux-{amd64,arm64}。CI 只发布这一个中性镜像；-cjk / -headless
+# 不再发布，需要的下游用 WITH_CJK=1 / Dockerfile.headless 自行派生。
 #
 # 由 .cnb/scripts/build-chromium.sh 驱动，流水线定义见 .cnb/workflows/build-chromium.yml。
+# 脚本按 version 解析基座 tag 与 digest，通过 CHROMIUM_BASE_IMAGE 传入；基座不存在时
+# 直接失败，不会静默退回官方 alpine。
 # ===================================================================
 
 # ===================================================================
 # 构建参数 (ARG)
-#   ALPINE_VERSION 基础镜像版本。默认 latest = 跟随上游最新稳定版，每天重建
-#   自动吃到新补丁/新小版本；也可钉具体版本（如 3.24.3）做复现或审计。
-#   注意 chromium 在 community 仓库，每个分支的 chromium 会随 Alpine 分支
+#   ALPINE_VERSION 选择基座的版本（latest / 3.24 / 3.24.3）。它不是 Chromium
+#   版本：chromium 在 community 仓库，每个分支的 chromium 会随 Alpine 分支
 #   「冻住」（3.20/3.21/3.22 分别停在 chromium 131/136/142），换分支才会
 #   换浏览器主版本。
+#   CHROMIUM_BASE_IMAGE CI 传入本仓库 Alpine 基础镜像的 digest 引用；默认值
+#   只用于脱离流水线的独立构建（等价于直接用官方 alpine），便于本地复现。
 # ===================================================================
 ARG ALPINE_VERSION=latest
+ARG CHROMIUM_BASE_IMAGE=alpine:${ALPINE_VERSION}
+FROM ${CHROMIUM_BASE_IMAGE}
 
-# 使用官方 Alpine 作为基础镜像（轻量、安全）
-# Alpine 特点：体积小（约5MB）、安全、适合容器化部署
-FROM alpine:${ALPINE_VERSION}
+# FROM 之前声明的 ARG 在构建阶段不可见，必须在此重新声明才能用于 LABEL
+ARG ALPINE_VERSION
+ARG CHROMIUM_BASE_NAME=alpine:${ALPINE_VERSION}
+ARG CHROMIUM_BASE_DIGEST=unknown
 
 # -------------------------------------------------------------------
 # 构建期参数
-#   WITH_*：变体开关，默认全关，主镜像保持最小
+#   WITH_*：本地/下游开关，默认全关。CI 只发中性镜像，不再传这些参数
 #   EXPECTED_CHROMIUM_MAJOR：期望的 Chromium 主版本。默认空 = 不校验，跟随
 #     上游（每天重建自动吃到新版本）；填具体主版本号才断言，避免「镜像内容
 #     变了但没人发现」；构建非默认 Alpine 分支时按实际版本填。
-#   CACHE_BUST：装包层的缓存击穿点。CI 每天传新值，保证上游补丁进得来；
-#     不传也不影响正确性（只是失去跨轮次缓存复用）。
+#   CACHE_BUST：装包层的缓存击穿点。GitHub 侧每天传新值，保证 gha 缓存
+#     不会把上游补丁挡在外面；CNB 侧不启用缓存，保持默认 0。
 #   BUILD_DATE / BUILD_REVISION：写进 OCI 标签，由 CI 传入。
 # -------------------------------------------------------------------
 ARG WITH_CJK=0
@@ -40,18 +50,13 @@ ARG BUILD_DATE=unknown
 ARG BUILD_REVISION=unknown
 
 # ===================================================================
-# STEP 1: 替换为自定义镜像源，加速软件包下载（国内用户必备）
-# 只保留「国内镜像 + 官方兜底」两组：原先十行（五个镜像站）会让 apk 在不同
-# 同步进度的仓库之间混用，容易撞上依赖版本冲突，也让每次索引解析多打好几次
-# 网络请求。apk add 自带索引拉取，不需要单独的 apk update 层。
+# STEP 1: 替换为腾讯云镜像源，加速软件包下载
+# 只替换主机名，保留基座自带的 main + community 两行：chromium 在
+# community，两行都必须留。基座（本仓库 Alpine 基础镜像）已经换过源时，
+# 这条 sed 是幂等的；本地直接用官方 alpine 构建时也能落到腾讯云。
+# apk add 自带索引拉取，不需要单独的 apk update 层。
 # ===================================================================
-RUN ALPINE_VER=$(cut -d. -f1,2 /etc/alpine-release) \
-    && printf '%s\n' \
-        "https://mirrors.cernet.edu.cn/alpine/v${ALPINE_VER}/main" \
-        "https://mirrors.cernet.edu.cn/alpine/v${ALPINE_VER}/community" \
-        "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/main" \
-        "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/community" \
-        >/etc/apk/repositories
+RUN sed -i 's@dl-cdn.alpinelinux.org@mirrors.cloud.tencent.com@g' /etc/apk/repositories
 
 # ===================================================================
 # STEP 2: 运行时依赖 + 时区 + 字体缓存（一层装完，同层清理）
@@ -61,7 +66,9 @@ RUN ALPINE_VER=$(cut -d. -f1,2 /etc/alpine-release) \
 #   freetype / harfbuzz / libstdc++ / fontconfig 全部自动拉进来（实测
 #   Alpine 3.24 上 `apk add chromium` 的闭包是 184 个包 / 761MiB installed），
 #   显式写出来不增体积、删掉也不减体积，所以只留「闭包里没有的」那几个。
-#   ca-certificates / font-freefont / tzdata / tini 都不在该闭包里。
+#   ca-certificates / font-freefont / tzdata / tini 都不在该闭包里；其中
+#   ca-certificates 与 tzdata 基座已装，这里仍显式列出，保证 Dockerfile 用默认
+#   基座（官方 alpine）独立构建时也成立，重复安装是幂等的。
 #
 # 关于体积：体积全在装包层，且几乎无可剥离内容——locale 是独立的
 #   chromium-lang（49.5MiB，默认不装），文档是 chromium-doc（2KB），
@@ -164,7 +171,8 @@ LABEL org.opencontainers.image.title="alpine-chromium" \
     org.opencontainers.image.version="${ALPINE_VERSION}" \
     org.opencontainers.image.revision="${BUILD_REVISION}" \
     org.opencontainers.image.created="${BUILD_DATE}" \
-    org.opencontainers.image.base.name="docker.io/library/alpine:${ALPINE_VERSION}" \
+    org.opencontainers.image.base.name="${CHROMIUM_BASE_NAME}" \
+    org.opencontainers.image.base.digest="${CHROMIUM_BASE_DIGEST}" \
     dev.alpine-chromium.cjk="${WITH_CJK}"
 
 # 无头启动参数刻意不写进镜像：--no-sandbox 取决于是否 root，--disable-dev-shm-usage

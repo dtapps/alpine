@@ -7,8 +7,8 @@
 #         · 构建脚本    .github/scripts/build-alpine.sh
 #         · 对照实现    .cnb/docker/Dockerfile.alpine + .cnb/scripts/build-alpine.sh
 #
-#   触发：schedule（每天跟上游）/ workflow_dispatch / push 到 main
-#         / pull_request（只构建不推送）
+#   触发：schedule（每天跟上游）/ workflow_dispatch
+#         只有这两条：不在 push / pull_request 上自动构建。
 #
 # 为什么复制而不是共用：两侧的标签规则、冒烟断言是同构的，但平台胶水不同
 # （CNB 读 CNB_* 变量、写 commit annotation；这里读 Actions 上下文、写
@@ -19,6 +19,9 @@
 # 标签契约与 CNB 完全一致（<alpine 版本> / <major.minor> / latest /
 # <版本>-linux-{amd64,arm64}），详见 docs/github.md 与
 # docs/alpine/images-and-tags.md。
+#
+# 下游：build-chromium workflow 的基座就是这里产出的 latest / <version>，
+# 所以 16:35 UTC 必须早于 Chromium 的 17:35 UTC（间隔 1 小时）。
 # ===================================================================
 name: build-alpine
 
@@ -36,19 +39,6 @@ on:
         required: false
         default: ''
         type: string
-  push:
-    branches:
-      - main
-    paths:
-      # 只在构建输入真的变了才重建：改文档、改扫描配置不该消耗一次多架构构建
-      - '.github/docker/Dockerfile.alpine'
-      - '.github/scripts/build-alpine.sh'
-      - '.github/workflows/build-alpine.yml'
-  pull_request:
-    paths:
-      - '.github/docker/Dockerfile.alpine'
-      - '.github/scripts/build-alpine.sh'
-      - '.github/workflows/build-alpine.yml'
 
 # GITHUB_TOKEN 默认只读，推送 GHCR 必须显式要 packages: write
 permissions:
@@ -62,8 +52,6 @@ concurrency:
 
 jobs:
   build:
-    # PR 走下面的 validate-alpine 作业：不登录、不推送
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -124,37 +112,3 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-  validate-alpine:
-    # PR 校验：不推送、不登录，只证明「这份 Dockerfile 能构建、容器能起来」。
-    # 全部用 Dockerfile 默认值（不传 ALPINE_VERSION），这样改了默认值也能被验到。
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - name: 检出源码
-        uses: actions/checkout@v7
-
-      - name: 初始化 buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: 构建（不推送）
-        run: |
-          set -eu
-          docker buildx build --platform linux/amd64 --load --pull \
-            -f .github/docker/Dockerfile.alpine -t alpine:pr .
-
-      - name: 冒烟测试
-        # 与 build-alpine.sh 的六项断言同源，去掉「版本前缀」与「OCI 标签 version」
-        # 两项：那两项依赖脚本解析出的实际版本，PR 里没传参。
-        run: |
-          set -eu
-          docker run --rm alpine:pr sh -eu -c '
-            [ -n "$(cat /etc/alpine-release)" ]
-            [ "$(cat /etc/timezone)" = "Asia/Shanghai" ]
-            [ "$(date +%z)" = "+0800" ]
-            [ "$(wc -l </etc/apk/repositories)" -eq 4 ]
-            for b in curl drill nc nslookup; do
-              command -v "$b" >/dev/null 2>&1
-            done
-            printf "SMOKE_OK"
-          '

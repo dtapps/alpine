@@ -2,20 +2,24 @@
 # GitHub Actions：构建并推送 Chromium 镜像到 GHCR
 #
 #   产物：ghcr.io/<owner>/<repo>/chromium  （本仓库即 ghcr.io/dtapps/alpine/chromium）
-#         三个变体：latest / latest-cjk / latest-headless（外加单平台标签）
+#         标签与 Alpine 基座一致：<alpine 版本> / <major.minor> / latest
+#         与 <版本>-linux-{amd64,arm64}
 #   实现：GitHub 侧独立维护一份（有意复制，不与 CNB 共用）
-#         · Dockerfile  .github/docker/Dockerfile.chromium、Dockerfile.headless
+#         · Dockerfile  .github/docker/Dockerfile.chromium（Dockerfile.headless 仅供本地派生）
 #         · 构建脚本    .github/scripts/build-chromium.sh
 #         · 对照实现    .cnb/docker/Dockerfile.* + .cnb/scripts/build-chromium.sh
 #
-#   触发：schedule（每天跟上游）/ workflow_dispatch / push 到 main
-#         / pull_request（只构建 default 变体，不推送）
+#   基座：本仓库构建的 Alpine 基础镜像（ghcr.io/<owner>/<repo>），由
+#         build-alpine workflow 产出；定时任务排在它之后 1 小时（16:35 UTC → 17:35 UTC）。
+#         基座不存在时构建直接失败，不会退回官方 alpine。
+#   触发：schedule（每天跟上游）/ workflow_dispatch
+#         只有这两条：不在 push / pull_request 上自动构建。
 #
 # 与 CNB 版的差异（复制之后各自演进）：
-#   1. 定时任务 02:00 Asia/Shanghai = 18:00 UTC（GitHub cron 只认 UTC）；
+#   1. 定时任务 01:35 Asia/Shanghai = 17:35 UTC（GitHub cron 只认 UTC）；
 #   2. 构建器与 QEMU 由 workflow 现装；chromium 的闭包很大，先释放磁盘；
 #   3. 层缓存用 GitHub Actions 缓存（type=gha），不往 GHCR 推 buildcache* 标签；
-#   4. arm64 走 QEMU 模拟，三变体多架构一次要几十分钟，超时给到 240 分钟；
+#   4. arm64 走 QEMU 模拟，多架构一次要几十分钟，超时给到 120 分钟；
 #   5. 元数据写 .github/annotation.json，供 Step Summary / artifact 使用。
 #
 # 标签契约与 CNB 完全一致，详见 docs/github.md 与
@@ -25,15 +29,16 @@ name: build-chromium
 
 on:
   schedule:
-    # 每天 02:00（Asia/Shanghai）= 18:00 UTC。比 CNB 的 01:30 晚 30 分钟，且与
-    # GitHub 自己的 Alpine 任务（16:35 UTC）隔开：chromium 三变体多架构要重得多，
-    # 同时跑只会互相抢上游镜像源带宽。
-    - cron: '0 18 * * *'
+    # 每天 01:35（Asia/Shanghai）= 17:35 UTC。必须排在 GitHub 自己的 Alpine
+    # 任务（16:35 UTC）之后 1 小时：Chromium 的基座就是那次构建产出的
+    # ghcr.io/<owner>/<repo>:latest。错峰同时避免 chromium 多架构构建与基座构建
+    # 抢上游镜像源带宽。
+    - cron: '35 17 * * *'
   workflow_dispatch:
     inputs:
       version:
         # 这里填的是 Alpine 版本，不是 Chromium 版本（Chromium 版本由 Alpine 分支仓库决定）
-        description: '选填：留空 = latest；也可填 Alpine 版本 3.24 / 3.24.3（不是 Chromium 版本）'
+        description: '选填：留空 = 跟随基座 latest；也可填 Alpine 版本 3.24 / 3.24.3（不是 Chromium 版本）。产物标签用解析出的实际版本'
         required: false
         default: ''
         type: string
@@ -42,20 +47,6 @@ on:
         required: false
         default: ''
         type: string
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/docker/Dockerfile.chromium'
-      - '.github/docker/Dockerfile.headless'
-      - '.github/scripts/build-chromium.sh'
-      - '.github/workflows/build-chromium.yml'
-  pull_request:
-    paths:
-      - '.github/docker/Dockerfile.chromium'
-      - '.github/docker/Dockerfile.headless'
-      - '.github/scripts/build-chromium.sh'
-      - '.github/workflows/build-chromium.yml'
 
 permissions:
   contents: read
@@ -67,15 +58,14 @@ concurrency:
 
 jobs:
   build:
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
-    timeout-minutes: 240
+    timeout-minutes: 120
     steps:
       - name: 检出源码
         uses: actions/checkout@v7
 
       - name: 释放磁盘空间
-        # hosted runner 的临时盘约 14 GiB：三变体 × 两平台的层缓存 + 构建上下文
+        # hosted runner 的临时盘约 14 GiB：两平台的层缓存 + 构建上下文
         # 会把盘吃满（表现为 buildx 报 no space left on device）。预装 SDK 与本
         # 构建无关，先删掉换几个 GiB。
         run: |
@@ -130,32 +120,3 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-  validate-chromium:
-    # PR 校验：只构建 default 变体（amd64，不推送），证明 Dockerfile 还能出镜像、
-    # 浏览器还能起来。三变体全跑一遍会让每个 PR 多等几十分钟。
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    steps:
-      - name: 检出源码
-        uses: actions/checkout@v7
-
-      - name: 初始化 buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: 构建（不推送）
-        # 不传 ALPINE_VERSION / WITH_*，验证的是 Dockerfile 里的默认值
-        run: |
-          set -eu
-          docker buildx build --platform linux/amd64 --load --pull \
-            -f .github/docker/Dockerfile.chromium -t alpine-chromium:pr .
-
-      - name: 冒烟测试
-        # 与 build-chromium.sh 的三项断言同源：二进制在、渲染栈可用、时区生效
-        run: |
-          set -eu
-          docker run --rm alpine-chromium:pr chromium --version
-          docker run --rm --shm-size=1g alpine-chromium:pr \
-            chromium --headless --no-sandbox --disable-dev-shm-usage \
-            --dump-dom about:blank >/dev/null
-          [ "$(docker run --rm alpine-chromium:pr date +%Z)" = "CST" ]

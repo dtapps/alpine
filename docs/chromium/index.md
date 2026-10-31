@@ -4,7 +4,7 @@
 
 同目录的 [README.md](README.md) 是一页速查，本目录把里面点到为止的部分展开成可操作的分册。两者冲突时以代码为准（见「事实来源」），并顺手修掉过时的那一份。
 
-> **仓库合并说明**：Chromium 镜像现在与 Alpine 基础镜像同仓库（`dtapp/alpine`）维护， 镜像地址是子路径 `docker.cnb.cool/dtapp/alpine/chromium`。本目录文档从原独立的 `alpine-chromium` 仓库迁入，镜像地址、元数据键（`chromium_` 前缀）、脚本与流水线 文件名已同步；描述「仓库全貌」的段落（尤其 [architecture.md](architecture.md)、 [ci-pipeline.md](ci-pipeline.md)）按合并后的布局写。Alpine 基础镜像的文档在 [上一级目录](../alpine/index.md)。
+> **仓库合并说明**：Chromium 镜像现在与 Alpine 基础镜像同仓库（`dtapp/alpine`）维护， 镜像地址是子路径 `docker.cnb.cool/dtapp/alpine/chromium`，并且 **Chromium 以本仓库构建的 Alpine 基础镜像为基座**（CI 按 digest 钉住，`latest` 由每天 `00:05` 的基座构建产出）。本目录文档从原独立的 `alpine-chromium` 仓库迁入，镜像地址、元数据键（`chromium_` 前缀）、脚本与流水线 文件名已同步；描述「仓库全貌」的段落（尤其 [architecture.md](architecture.md)、 [ci-pipeline.md](ci-pipeline.md)）按合并后的布局写。Alpine 基础镜像的文档在 [上一级目录](../alpine/index.md)。
 
 ## 从哪里开始
 
@@ -25,8 +25,8 @@
 |--------------------------------------------------|----------------------------------------------------------------------|----------------------------------------------------------|
 | [architecture.md](architecture.md)               | 仓库全貌、触发矩阵、文件职责、关键设计取舍                           | `.cnb.yml`、`.cnb/workflows/**`                          |
 | [getting-started.md](getting-started.md)         | 拉取、无头截图与 PDF、容器内自检、作为基础镜像、按 digest 固定       | 制品库 + `Dockerfile`                                    |
-| [dockerfile.md](dockerfile.md)                   | 两个 Dockerfile 逐段解析、依赖闭包与体积、字体与变体、加包标准       | `.cnb/docker/Dockerfile.chromium`、`Dockerfile.headless` |
-| [mirrors.md](mirrors.md)                         | APK 源顺序、Alpine 版本推导、源失效处置、供应链信任面                | `Dockerfile` STEP 1                                      |
+| [dockerfile.md](dockerfile.md)                   | Dockerfile 逐段解析、依赖闭包与体积、字体与可选开关、加包标准        | `.cnb/docker/Dockerfile.chromium`、`Dockerfile.headless` |
+| [mirrors.md](mirrors.md)                         | APK 源策略、Alpine 版本推导、源失效处置、供应链信任面                | `Dockerfile` 的换源段（仅 CNB）                          |
 | [build.md](build.md)                             | 本地与 CI 构建、buildx、多架构产物落地方式                           | `.cnb/scripts/build-chromium.sh`                         |
 | [ci-pipeline.md](ci-pipeline.md)                 | 事件矩阵、按钮与权限、imports、插件职责、改流水线步骤                | `.cnb.yml`、`.cnb/web_trigger.yml`、`workflows`          |
 | [images-and-tags.md](images-and-tags.md)         | 镜像地址、标签契约、manifest list 与单平台标签、digest 固定          | 制品库 + 构建脚本                                        |
@@ -52,21 +52,22 @@
 
 文档的事实基准只有这几个文件，改动行为时先改代码、再改文档：
 
-| 文件                              | 决定什么                                             |
-|-----------------------------------|------------------------------------------------------|
-| `.cnb/docker/Dockerfile.chromium` | 镜像内容：基础版本、源、包、时区、环境变量、预置用户 |
-| `.cnb/docker/Dockerfile.headless` | `-headless` 变体：默认无头参数 + tini                |
-| `.cnb/scripts/build-chromium.sh`  | 构建、推送、标签拼接、元数据汇总                     |
-| `.cnb.yml`、`.cnb/workflows/**`   | 什么事件触发什么流水线                               |
-| `.cnb/web_trigger.yml`            | 按钮名称、权限、输入项                               |
-| `Makefile`、`.yamlfmt`            | 格式化范围与规则                                     |
-| `.scanignore`、`.cnb/security/**` | 扫描范围与排除                                       |
+| 文件                              | 决定什么                                                 |
+|-----------------------------------|----------------------------------------------------------|
+| `.cnb/docker/Dockerfile.alpine`   | 基座内容：Alpine 版本、源（main-only）、工具、时区       |
+| `.cnb/docker/Dockerfile.chromium` | 镜像内容：基座引用、源覆写、包、时区、环境变量、预置用户 |
+| `.cnb/docker/Dockerfile.headless` | 本地派生配方：默认无头参数 + tini（CI 不发布）           |
+| `.cnb/scripts/build-chromium.sh`  | 构建、推送、标签拼接、元数据汇总                         |
+| `.cnb.yml`、`.cnb/workflows/**`   | 什么事件触发什么流水线                                   |
+| `.cnb/web_trigger.yml`            | 按钮名称、权限、输入项                                   |
+| `Makefile`、`.yamlfmt`            | 格式化范围与规则                                         |
+| `.scanignore`、`.cnb/security/**` | 扫描范围与排除                                           |
 
 ## 维护约定
 
 - 行为变更必须同步文档：改镜像 → [dockerfile.md](dockerfile.md) 与 [getting-started.md](getting-started.md)；改流水线 → [ci-pipeline.md](ci-pipeline.md)；改标签 → [images-and-tags.md](images-and-tags.md)；改元数据键 → [metadata-and-badges.md](metadata-and-badges.md)；改扫描配置 → [security-baseline.md](security-baseline.md)；改格式化 → [formatting.md](formatting.md)。
 - 徽章与元数据（各 key 含义、体积怎么算、`unknown` 什么含义）只在 [metadata-and-badges.md](metadata-and-badges.md) 解释，其它篇引用而不另立说法。
-- 安全取舍（root 运行、不装排障工具、未签名、无层扫描）以 [SECURITY.md](../../SECURITY.md) 为准，`docs/` 只解释取舍的影响，不复述整张清单。
+- 安全取舍（root 运行、排障工具跟随基座、未签名、无层扫描）以 [SECURITY.md](../../SECURITY.md) 为准，`docs/` 只解释取舍的影响，不复述整张清单。
 - 提交前跑 `make format-markdown`，让表格与空行符合 `markdownfmt` 的结果。
 - 链接一律用相对路径：本目录内互链写 `xxx.md`，指向仓库根目录写 `../../xxx.md`，指向 Alpine 基础镜像文档写 `../xxx.md`。
 - 新增文档要补进上面的「文档清单」表格，否则等于不存在。

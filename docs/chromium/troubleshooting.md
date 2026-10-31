@@ -6,59 +6,77 @@
 
 | 症状                                                             | 可能原因                                                                      | 处置                                                                          | 对应文档                             |
 |------------------------------------------------------------------|-------------------------------------------------------------------------------|-------------------------------------------------------------------------------|--------------------------------------|
-| `FROM` 阶段拉不到基础镜像                                        | `version` 填了不存在的 alpine tag，或到上游网络不通                           | 换真实存在的 tag，用 `latest` 对照网络                                        | [构建](build.md)                     |
-| `apk add` 超时或 404                                             | 新 minor 的 `vX.Y` 路径镜像站未同步、源站故障                                 | 确认路径推导值，等同步或退回官方源                                            | [APK 源与网络](mirrors.md)           |
+| `FROM` 阶段拉不到基础镜像                                        | 基座引用无效：CI 里基座标签不存在，本地则是 alpine tag 不存在或网络不通       | 先跑 build-alpine 产出基座，或本地换真实存在的 alpine tag                     | [构建](build.md)                     |
+| `apk add` 超时或 404                                             | 镜像站未同步新 minor、源站故障、基座源主机不是你预期的那个                    | CNB 检查 `sed` 目标主机，GitHub 检查官方源连通性                              | [APK 源与网络](mirrors.md)           |
 | buildx 报 bootstrap 失败                                         | 自建了 `docker-container` builder                                             | 删掉自建 builder，用 CNB 内置 builder                                         | [构建](build.md)                     |
 | push 返回 401 / 403                                              | token 缺失或过期 / 无该仓库写权限                                             | 核对 `imports` 与 registry 地址                                               | [CI 流水线](ci-pipeline.md)          |
 | 元数据里 digest 是 `unknown`                                     | 取不到 manifest digest，或元数据步骤没跑                                      | 手动 `imagetools inspect` 复核                                                | [构建元数据](metadata-and-badges.md) |
-| 徽章灰色或显示 `unknown`                                         | key 拼错、annotation 未写入、看错 commit                                      | 对照六个 key 与写入步骤                                                       | [构建元数据](metadata-and-badges.md) |
+| 徽章灰色或显示 `unknown`                                         | key 拼错、annotation 未写入、看错 commit                                      | 对照元数据 key 与写入步骤                                                     | [构建元数据](metadata-and-badges.md) |
 | 体积显示 `unknown`                                               | 取到的对象里没有 `layers` 字段（拿到的是 index）                              | 按平台清单 digest 再取 `--raw`                                                | [构建元数据](metadata-and-badges.md) |
 | 单平台标签里看到的东西与预期不符                                 | 分不清 index 与镜像清单                                                       | `--raw` 里有 `layers` 才是镜像清单                                            | [镜像与标签](images-and-tags.md)     |
-| `Running as root without --no-sandbox is not supported`          | 容器内是 root，Chromium 不允许 root 带沙箱启动                                | 加 `--no-sandbox`，或用 `-headless` 变体；要沙箱就 `USER chrome`              | [安全基线](security-baseline.md)     |
+| `Running as root without --no-sandbox is not supported`          | 容器内是 root，Chromium 不允许 root 带沙箱启动                                | 加 `--no-sandbox`，或用自建 headless 镜像；要沙箱就 `USER chrome`             | [安全基线](security-baseline.md)     |
 | `No usable sandbox!`                                             | userns 与 SUID helper 都不可用，与「是不是 root」无关                         | 加 `--no-sandbox`，或 `--cap-add=SYS_ADMIN` / 换宿主环境                      | [安全基线](security-baseline.md)     |
 | 渲染进程崩溃 / 日志里出现 `/dev/shm` 相关报错                    | 容器默认 `/dev/shm` 只有 64MB，渲染写满                                       | `--shm-size=1g` + `--disable-dev-shm-usage`，或 `--tmpfs /dev/shm:rw,size=1g` | [快速上手](getting-started.md)       |
 | 并发实例互相踢：`SingletonLock` / `profile appears to be in use` | root + root 属主 HOME 时包装脚本强塞 `--user-data-dir=$HOME/.config/chromium` | 每个实例显式传 `--user-data-dir=/tmp/<name>`                                  | 本册「并发实例互相踢」               |
 | 截图或 PDF 是空白                                                | 页面没加载完、窗口太小、输出路径不可写                                        | 设 `--window-size`、`--virtual-time-budget`，检查退出码                       | [快速上手](getting-started.md)       |
-| 中文显示成方块、页面缺字                                         | 主镜像的 `font-freefont` 完全不含 CJK 字形（实测 cmap 里码位为 0）            | 换 `-cjk` 变体（`font-noto-cjk`，+88.8 MiB），`fc-list :lang=zh` 验证         | [Dockerfile 解析](dockerfile.md)     |
+| 中文显示成方块、页面缺字                                         | 主镜像的 `font-freefont` 完全不含 CJK 字形（实测 cmap 里码位为 0）            | 用 `WITH_CJK=1` 自建（`font-noto-cjk`，+88.8 MiB），`fc-list :lang=zh` 验证   | [Dockerfile 解析](dockerfile.md)     |
 | 挂了自定义字体但页面仍缺字                                       | 挂载后没重建 fontconfig 缓存                                                  | `fc-cache -fv` 后重新 `fc-list`                                               | [Dockerfile 解析](dockerfile.md)     |
 | `chromium: not found`                                            | 用了纯 alpine 基础镜像，或派生镜像删了包                                      | 换成 `docker.cnb.cool/dtapp/alpine/chromium`，核对二进制                      | [快速上手](getting-started.md)       |
 | 渲染 / 截图一直不返回                                            | 页面资源挂住、容器出不了网、没有等待上限                                      | 先用 `about:blank` 区分，再给 `--virtual-time-budget`                         | [快速上手](getting-started.md)       |
 | 加了 `--single-process` 后渲染进程随机崩                         | 那是调试开关，新版无头下必崩                                                  | 删掉 `--single-process` 与 `--no-zygote`                                      | 本册「先把启动参数放对位置」         |
 | 派生镜像 `npm i puppeteer` 又下载了一份浏览器                    | `PUPPETEER_SKIP_DOWNLOAD=1` 被覆盖或丢失                                      | 别覆盖它；确实要官方 Chromium 时才覆盖                                        | 本册「镜像内路径与环境变量」         |
 | 容器内时间是 UTC                                                 | 时区未生效，`/etc/localtime` 被覆盖或删了 tzdata                              | 检查时区文件与 `TZ` 变量                                                      | [Dockerfile 解析](dockerfile.md)     |
-| 容器里找不到 `curl` / `nc` / `dig`                               | 本镜像刻意不装排障工具                                                        | 派生镜像加包，或在宿主机侧排查                                                | [安全基线](security-baseline.md)     |
+| 容器里找不到 `curl` / `nc` / `drill` / `git`                     | 用错了镜像，或派生镜像裁掉了基座里的工具（本镜像默认继承它们）                | 对照 `FROM`；需要 `dig` 时在派生镜像加 `bind-tools`                           | [安全基线](security-baseline.md)     |
 | `make format` 报 command not found                               | 本机缺四个格式化工具之一                                                      | 按工具链文档安装                                                              | [格式化](formatting.md)              |
 | 页面没有构建按钮 / 点了不触发                                    | 按钮 `event` 与 workflow 触发键不一致或未 include                             | 三处事件名对齐                                                                | [CI 流水线](ci-pipeline.md)          |
 | PR 被 SCA 拦住                                                   | `failOnSeverity: high` 命中 high 及以上漏洞                                   | 升级包或确认误报，不要关掉门禁                                                | [安全基线](security-baseline.md)     |
 
 ## 构建阶段
 
-### `FROM` 拉取失败
+### 找不到基座
 
-原因只有两类：`version` 不是 Docker Hub 上真实存在的 alpine tag；或 Runner 到 Docker Hub 的网络不通。先区分：
+脚本在 `FROM` 之前先解析基座 digest，失败时的报错是 `❌ 找不到基座 <仓库 slug>:<version>：先运行 build-alpine 流水线并传入相同的 version…`。它发生在构建阶段之前，说明本仓库基座仓库里没有对应标签：
+
+- 定时任务：当天 `00:05` 的基座构建失败或还没跑完，`<仓库 slug>:latest` 不存在；
+- 手动填了具体版本（`3.24` / `3.24.3`）：基座侧从未以该版本构建过，或者被清理了；
+- 在 fork / 私有仓库里只跑了 Chromium 流水线，基座路径解析到你的命名空间，那里还没有产物。
 
 ```bash
-# 1) 目标 tag 是否存在
+# 直接确认标签与 digest
+docker buildx imagetools inspect docker.cnb.cool/dtapp/alpine:latest
+```
+
+处置：先用「打包 Alpine 镜像」按钮以相同 `version` 跑一次基座流水线，成功后再重跑 Chromium。Chromium 脚本不会退回官方 `alpine`，所以这一步不能跳过。
+
+### `FROM` 拉取失败
+
+CI 里 `FROM` 用 `CHROMIUM_BASE_IMAGE` 指向本仓库基座 `<仓库 slug>:<version>@sha256:…`，本地不传它时才落到官方 `alpine`。所以先分清场景：
+
+```bash
+# 1) CI：基座标签是否存在（不存在会先报「找不到基座」，见上一小节）
+docker buildx imagetools inspect docker.cnb.cool/dtapp/alpine:3.24
+# 2) 本地：官方 alpine tag 是否存在、网络是否通
 docker buildx imagetools inspect alpine:3.24
-# 2) 用 latest 对照：latest 也失败说明是网络问题
+# 3) 用 latest 对照：latest 也失败说明是网络/registry 不可达，而不是版本号写错
 docker buildx imagetools inspect alpine:latest
 ```
 
-处置：`version` 填 `3.24`、`3.24.3` 这类真实存在的 Alpine 版本号，不要写成 `v3.24`。也别忘了 `version` 是 **Alpine 版本**，填 Chromium 版本号（例如 `131`）会被 `build-chromium.sh` 直接拦下（它的校验只放行 `latest` 与 `3.24` / `3.24.3` 这类版本号）。
+处置：CI 里先以相同 `version` 跑一次 build-alpine，让基座标签就位；本地要么换真实存在的 alpine tag，要么显式传 `CHROMIUM_BASE_IMAGE` 指向已拉到的基座。`version` 填 `3.24`、`3.24.3` 这类 Alpine 版本号，不要写成 `v3.24`。也别忘了 `version` 是 **Alpine 版本**，填 Chromium 版本号（例如 `131`）会被 `build-chromium.sh` 直接拦下（它的校验只放行 `latest` 与 `3.24` / `3.24.3` 这类版本号）。
 
-想构建非默认分支（例如 `3.21`）时，`FROM` 能过，但紧接着会被 Dockerfile 的版本断言拦下——这仍是**预期行为**：得同时传 `--build-arg EXPECTED_CHROMIUM_MAJOR=<该分支的 chromium 主版本>`（3.21 是 136，3.22 是 142），并且清楚那个分支的 chromium 已经冻结、3.20 更是早已 EOL。
+想构建非默认分支（例如 `3.21`）时，本地 `FROM` 能过（基座是官方 `alpine:3.21`），但紧接着会被 Dockerfile 的版本断言拦下——这仍是**预期行为**：得同时传 `--build-arg EXPECTED_CHROMIUM_MAJOR=<该分支的 chromium 主版本>`（3.21 是 136，3.22 是 142），并且清楚那个分支的 chromium 已经冻结、3.20 更是早已 EOL。CI 里还要求基座仓库已有 `3.21` 标签，否则会先停在「找不到基座」。
 
-定时任务传的是 `version=latest`，脚本对应传 `--build-arg ALPINE_VERSION=latest`，`Dockerfile` 默认值也是 `latest`，行为一致。所以「定时任务失败、本地构建成功」时，先看 Runner 出网，再看你本地是否显式钉了与 CI 不同的基础版本。
+定时任务传的是 `version=latest`，脚本先用它选基座 `<仓库 slug>:latest`，读容器得到实际版本（如 `3.24.3`）后再传 `--build-arg ALPINE_VERSION=3.24.3`。本地不传 `CHROMIUM_BASE_IMAGE` 时基座是官方 `alpine:latest`，与 CI 的私有基座不是同一份。所以「定时任务失败、本地构建成功」时，先看 Runner 出网与基座标签，再看你本地是否钉了与 CI 不同的 `ALPINE_VERSION` / `CHROMIUM_BASE_IMAGE`。
 
 ### `apk add` 超时或 404
 
-镜像里没有单独的 `apk update` 层，`apk add --no-cache` 自己拉索引。源路径不是手写的，而是构建期从镜像内 `/etc/alpine-release` 推导出的 `vX.Y`，最终写进 `/etc/apk/repositories` 的只有四行：cernet 的 `main` / `community`，加官方 `dl-cdn` 的 `main` / `community` 兜底。
+镜像里没有单独的 `apk update` 层，`apk add --no-cache` 自己拉索引。源路径不在本仓库手写：基座自带的 `/etc/apk/repositories` 已经是 `vX.Y` 的 `main` + `community` 两行，CNB 的 STEP 1 只用 `sed` 把主机名换成腾讯云；GitHub 侧不覆写，沿用官方源的两行。
 
 ```bash
-docker run --rm alpine:3.24 sh -c 'cat /etc/alpine-release; cat /etc/apk/repositories'
+docker run --rm docker.cnb.cool/dtapp/alpine/chromium:latest \
+  sh -c 'cat /etc/alpine-release; cat /etc/apk/repositories'
 ```
 
-看到 `vX.Y` 与报错 URL 里的路径不一致，说明基础镜像的版本与源路径推导对不上（例如手动改了 `repositories`）。只剩 404 而路径一致，是镜像站尚未同步该 minor：`apk` 会先打 cernet，连不上再落到最后两行官方源。处置是等镜像站同步，不要为了绕开 404 把源顺序改成「官方优先」——那会把国内构建速度一起赔进去；也别再把一堆镜像站混着写，不同同步进度的仓库之间容易撞上依赖版本冲突。
+看到报错 URL 里的主机不是预期的那一个，说明换源没生效或被人为改过：CNB 侧检查 `sed` 是否命中 `dl-cdn.alpinelinux.org`，GitHub 侧检查是否有人加了换源步骤。只剩 404 而主机正确，是源站尚未同步该 minor：CNB 侧只有腾讯云一台源，没有跨站兜底，只能等同步或按变更流程临时补源；GitHub 侧是官方源。不要为了绕开 404 临时堆一堆镜像站——不同同步进度的仓库之间容易撞上依赖版本冲突。
 
 Chromium 镜像还有一类特有表现：索引拉取通过但 `apk add` 阶段报某个依赖 `unavailable`。那是包名或仓库归属在 Alpine 新版本里变了（`chromium` 与它的图形栈属于这一类），不是网络问题，处置见 [维护手册](maintenance.md) 的「大版本升级」第三步。
 
@@ -91,16 +109,16 @@ docker login -u "${CNB_TOKEN_USER_NAME}" -p "${CNB_TOKEN}" "${CNB_DOCKER_REGISTR
 
 ### manifest list 与单平台标签的区别
 
-| 标签                                                           | 承诺的平台范围 | `--raw` 里看到的对象                  |
-|----------------------------------------------------------------|----------------|---------------------------------------|
-| `latest`、`<version>`、`latest-cjk`、`latest-headless` 等      | amd64 + arm64  | 含两个平台条目的 manifest list        |
-| `latest-linux-amd64`、`<version>-cjk-linux-arm64` 等单平台标签 | 单一平台       | 直接指向该架构的镜像清单，含 `layers` |
+| 标签                                       | 承诺的平台范围 | `--raw` 里看到的对象                  |
+|--------------------------------------------|----------------|---------------------------------------|
+| `latest`、`<major.minor>`、`<alpine 版本>` | amd64 + arm64  | 含两个平台条目的 manifest list        |
+| `<版本>-linux-amd64`、`<版本>-linux-arm64` | 单一平台       | 直接指向该架构的镜像清单，含 `layers` |
 
 单平台标签现在由 `docker buildx imagetools create` 从 manifest list 里取出该架构的 digest 直接打出来，**不再是**带 attestation 的 index：
 
 ```bash
 # 有 layers 就说明拿到的是镜像清单
-docker buildx imagetools inspect docker.cnb.cool/dtapp/alpine/chromium:latest-linux-amd64 --raw | head -5
+docker buildx imagetools inspect docker.cnb.cool/dtapp/alpine/chromium:3.24.3-linux-amd64 --raw | head -5
 docker buildx imagetools inspect docker.cnb.cool/dtapp/alpine/chromium:latest --raw | head -5
 ```
 
@@ -114,7 +132,7 @@ docker buildx imagetools inspect docker.cnb.cool/dtapp/alpine/chromium:latest --
 docker buildx imagetools inspect docker.cnb.cool/dtapp/alpine/chromium:latest --format '{{.Manifest.Digest}}'
 ```
 
-无输出的常见原因是推送步骤并未真正完成（前面的 `buildx build --push` 非零退出但后续步骤仍在跑），或者该 tag 在制品库里尚未可读。Chromium 镜像层大，推送耗时长，网络抖动下更容易出现「推了一半」；先确认 default、`-cjk`、`-headless` 三个变体的退出码，再重复上面的命令。
+无输出的常见原因是推送步骤并未真正完成（前面的 `buildx build --push` 非零退出但后续步骤仍在跑），或者该 tag 在制品库里尚未可读。Chromium 镜像层大，推送耗时长，网络抖动下更容易出现「推了一半」；先确认构建阶段的退出码，再重复上面的命令。
 
 ## 元数据与徽章
 
@@ -123,7 +141,7 @@ docker buildx imagetools inspect docker.cnb.cool/dtapp/alpine/chromium:latest --
 三个原因按概率排：
 
 1. annotation 步骤没执行。构建在某一步 `exit 1`，写入元数据的 `cnbcool/annotations` 阶段根本没跑。
-2. key 拼写不一致。可写入的 key 只有 `chromium_image_digest`、`chromium_image_digest_short`、`chromium_image_size`、`chromium_image_size_arm64`、`chromium_version`、`chromium_built_at`。
+2. key 拼写不一致。可写入的 key 只有 `chromium_image_digest`、`chromium_image_digest_short`、`chromium_image_size`、`chromium_image_size_arm64`、`chromium_base_image`、`chromium_base_digest`、`chromium_version`、`chromium_built_at`。
 3. 看的是另一条 commit。徽章里的 `latest` 指默认分支最近一次构建，不是「最近一次手动构建」。
 
 ```bash
@@ -131,7 +149,7 @@ docker buildx imagetools inspect docker.cnb.cool/dtapp/alpine/chromium:latest --
 grep -n 'image_\|chromium_version\|chromium_built_at' .cnb/scripts/build-chromium.sh | tail -8
 ```
 
-`chromium_version` 是本期新增的：标签只固定 Alpine 版本，同一个标签里的 Chromium 会随上游补丁漂移，所以「这个 digest 里是哪个浏览器」只能看这个 key。
+`chromium_version` 是本期新增的：标签只固定 Alpine 版本，同一个标签里的 Chromium 会随上游补丁漂移，所以「这个 digest 里是哪个浏览器」只能看这个 key。`chromium_base_image` / `chromium_base_digest` 记录本次构建叠在哪个基座上，用来回答「这个 Chromium 镜像是从哪份 Alpine 基座出来的」。
 
 ### 体积显示 `unknown`
 
@@ -140,7 +158,7 @@ grep -n 'image_\|chromium_version\|chromium_built_at' .cnb/scripts/build-chromiu
 先确认取到的是什么。单平台标签现在直接指向该架构的镜像清单，所以通常直接就能看到 `layers`：
 
 ```bash
-docker buildx imagetools inspect docker.cnb.cool/dtapp/alpine/chromium:latest-linux-amd64 --raw | head -5
+docker buildx imagetools inspect docker.cnb.cool/dtapp/alpine/chromium:3.24.3-linux-amd64 --raw | head -5
 ```
 
 没有 `layers` 就说明拿到的是 index（旧产物，或你误用了多架构标签），改从多架构 index 里取出该平台镜像清单的 digest，再对 digest 取原文：
@@ -161,13 +179,13 @@ docker buildx imagetools inspect "docker.cnb.cool/dtapp/alpine/chromium@${PLATFO
 
 基础镜像刻意不内置任何启动参数：`--no-sandbox` 取决于你是不是 root，`--disable-dev-shm-usage` 取决于 `/dev/shm` 多大，写进 `ENTRYPOINT` 等于替所有下游决定启动参数（[CONTRIBUTING](../../CONTRIBUTING.md) 的硬性规则）。三种落地方式：
 
-| 方式                                 | 适合                                                          |
-|--------------------------------------|---------------------------------------------------------------|
-| 推荐：`-e CHROMIUM_USER_FLAGS="..."` | 自己拼参数；Puppeteer 也吃得到                                |
-| 用 `-headless` 变体                  | 不想每次拼命令行；`docker run …:latest-headless` 就打一次冒烟 |
-| 命令行直接传 `chromium --headless …` | 一次性排查，或脚本里参数各不相同                              |
+| 方式                                 | 适合                                                   |
+|--------------------------------------|--------------------------------------------------------|
+| 推荐：`-e CHROMIUM_USER_FLAGS="..."` | 自己拼参数；Puppeteer 也吃得到                         |
+| 自建 `Dockerfile.headless` 派生镜像  | 不想每次拼命令行；`docker run <自建镜像>` 就打一次冒烟 |
+| 命令行直接传 `chromium --headless …` | 一次性排查，或脚本里参数各不相同                       |
 
-三者的差别只在参数落在哪里：`CHROMIUM_USER_FLAGS` 由 Alpine 的 `/usr/lib/chromium/chromium-launcher.sh` 接在 `/etc/chromium/*.conf` 的系统默认值之后；`-headless` 变体把一套默认值直接写进镜像的 `ENV`，并用 `tini` 当 PID 1；命令行参数优先级最高，适合临时覆盖。变体内置的默认值是：
+三者的差别只在参数落在哪里：`CHROMIUM_USER_FLAGS` 由 Alpine 的 `/usr/lib/chromium/chromium-launcher.sh` 接在 `/etc/chromium/*.conf` 的系统默认值之后；自建 headless 镜像把一套默认值直接写进镜像的 `ENV`，并用 `tini` 当 PID 1；命令行参数优先级最高，适合临时覆盖。配方里的默认值是：
 
 ```text
 --headless --no-sandbox --disable-dev-shm-usage --hide-scrollbars
@@ -192,7 +210,7 @@ docker run --rm --init --shm-size=1g \
 - 新版无头会自动注入 `--ozone-platform=headless`、`--use-angle=swiftshader`、`--no-first-run`，以及一个临时 `--user-data-dir`（你没显式指定时）。所以不要再手写这几个。
 - `--no-sandbox` 只在 root 下必需（见下一节）。`--no-zygote` 只在配 `--no-sandbox` 时有意义，无头场景不需要；`--single-process` 是调试开关，新版无头下会随机崩。**这两个都不该出现在你的推荐参数里。**
 - `--disable-gpu` 在新版无头下基本冗余：GPU 栈本来就是 SwiftShader / ANGLE 的软件路径，去掉它没有副作用。除非你要跑 WebGL / Canvas 且发现软件渲染不够，那时应该装 `chromium-swiftshader`（`--build-arg WITH_SWIFTSHADER=1`，约 5 MiB）并删掉 `--disable-gpu`。
-- `-headless` 变体确实内置了一套默认参数，但**默认镜像没有**。想关掉变体的默认值：`docker run -e CHROMIUM_USER_FLAGS="" image:latest-headless`。
+- 自建的 headless 镜像内置了一套默认参数，但**默认镜像没有**。想关掉自建镜像的默认值：`docker run -e CHROMIUM_USER_FLAGS="" <自建镜像>`。
 
 ### `Running as root without --no-sandbox is not supported`
 
@@ -313,23 +331,23 @@ ls -l page.png
 先确认容器里到底有没有中文字体：
 
 ```bash
-# 主镜像：输出为空
+# 默认镜像：输出为空
 docker run --rm docker.cnb.cool/dtapp/alpine/chromium:latest sh -c 'fc-list :lang=zh | head'
-# -cjk 变体：应当列出若干 Noto CJK 字族
-docker run --rm docker.cnb.cool/dtapp/alpine/chromium:latest-cjk sh -c 'fc-list :lang=zh | head'
+# 自建的 CJK 镜像：应当列出若干 Noto CJK 字族
+docker run --rm my-chromium:cjk sh -c 'fc-list :lang=zh | head'
 ```
 
 处置按场景选：
 
-| 场景                    | 做法                                                                            | 体积代价               |
-|-------------------------|---------------------------------------------------------------------------------|------------------------|
-| 需要中文截图 / 抓中文站 | 直接用 `-cjk` 变体：`--build-arg WITH_CJK=1` 装 `font-noto-cjk`，简繁日韩全覆盖 | +88.8 MiB（installed） |
-| 只要简体、想更省一点    | 派生镜像里装 `font-wqy-zenhei`（16.3 MiB，仅简体；本期未内置，属于下游自选）    | 16.3 MiB               |
-| 已有自己的一套字体      | 挂载字体目录后必须 `fc-cache -fv` 重建缓存                                      | 字体本身大小           |
+| 场景                    | 做法                                                                         | 体积代价               |
+|-------------------------|------------------------------------------------------------------------------|------------------------|
+| 需要中文截图 / 抓中文站 | 自建：`--build-arg WITH_CJK=1` 装 `font-noto-cjk`，简繁日韩全覆盖            | +88.8 MiB（installed） |
+| 只要简体、想更省一点    | 派生镜像里装 `font-wqy-zenhei`（16.3 MiB，仅简体；本期未内置，属于下游自选） | 16.3 MiB               |
+| 已有自己的一套字体      | 挂载字体目录后必须 `fc-cache -fv` 重建缓存                                   | 字体本身大小           |
 
 ```bash
-# 本地构建 -cjk 变体
-docker build --build-arg WITH_CJK=1 -f .cnb/docker/Dockerfile.chromium -t alpine-chromium:cjk .
+# 自建带中文字形的镜像
+docker build --build-arg WITH_CJK=1 -f .cnb/docker/Dockerfile.chromium -t my-chromium:cjk .
 
 # 挂载自定义字体后重建缓存，否则 fontconfig 看不到新字族
 docker run --rm -v "$PWD/fonts:/usr/share/fonts/custom:ro" \
@@ -375,7 +393,7 @@ docker run --rm --shm-size=1g -v "$PWD:/work" -w /work \
 第 1 步就卡住，问题在容器（`/dev/shm`、sandbox 参数）；第 1 步正常、第 2 步卡住，问题在页面或网络：
 
 - 页面有长轮询、websocket、永不结束的第三方脚本时，`load` 事件永远不会触发，必须给上限。
-- 容器出不了网时，请求会挂到超时：用宿主机侧命令确认目标可达、DNS 正常——本镜像刻意不装 `curl` / `dig`，容器内没有现成探测工具，这一点见下一小节。
+- 容器出不了网时，请求会挂到超时：先在容器内用继承自基座的 `curl -v` / `nc -zv` / `drill` 探活，再用宿主机侧命令复核目标可达与 DNS；真正的 `dig`（`bind-tools`）不在镜像里，见下一小节。
 - HTTPS 页面报证书错误，先怀疑派生镜像裁掉了 `ca-certificates`。
 - 顺带一提：如果你为了「减少进程」加过 `--single-process`，先删掉它再复测，它带来的随机崩溃很容易被误判成网络问题。
 
@@ -413,19 +431,24 @@ docker run --rm docker.cnb.cool/dtapp/alpine/chromium:latest sh -c 'date; cat /e
 
 期望 `date` 显示 `CST`、`/etc/timezone` 为 `Asia/Shanghai`、`/etc/localtime` 指向 `/usr/share/zoneinfo/Asia/Shanghai`。派生镜像里常见三种破坏方式：删了 `tzdata`、覆盖了 `/etc/localtime`、在 `docker run` 时传了别的 `TZ`。基础镜像本身没问题的话，先查派生镜像的清理步骤。
 
-### 容器里找不到 `curl` / `nc` / `dig`
+### `curl` / `nc` / `drill` / `git` 找不到
 
-不是故障：本镜像刻意不装任何排障工具（`curl`、`netcat-openbsd`、`bind-tools` 都不在包清单里），只装 Chromium 与它的运行时依赖。定位是「容器里能跑无头浏览器」，不是「进容器就能探端口查 DNS」。
+先确认是不是用错了镜像：这几个工具由本仓库的 Alpine 基座提供，Chromium 镜像默认继承，正常情况下 `curl --version`、`nc -h`、`drill -v`、`git --version` 都能直接跑。报 `not found` 通常是 `FROM` 用了官方 `alpine` 或别的镜像，或者派生镜像裁掉了基座里的工具。
 
-处置按需选一种：
+```bash
+docker run --rm docker.cnb.cool/dtapp/alpine/chromium:latest sh -c \
+  'command -v curl nc drill git; curl --version | head -1'
+```
+
+仍然没有、或需要 `dig` / `nslookup`（`bind-tools` 没装），按需在派生镜像里补：
 
 ```dockerfile
 # 该派生镜像确实需要在容器内排查时才加，并说明场景与体积代价
 FROM docker.cnb.cool/dtapp/alpine/chromium:latest
-RUN apk add --no-cache curl bind-tools
+RUN apk add --no-cache bind-tools
 ```
 
-或者干脆在宿主机侧排查，把容器只当成执行渲染的地方。不要顺手把排障工具加进基础镜像——那会让每个下游都背上这份体积与攻击面（理由见 [安全基线](security-baseline.md)）。
+也可以直接在宿主机侧排查，把容器只当成执行渲染的地方。不要把额外的排障工具加进 Chromium 层——基座已经有一套，再叠加会让每个下游都背上重复的体积与攻击面（理由见 [安全基线](security-baseline.md)）。
 
 ### 格式化工具缺失
 
@@ -462,7 +485,7 @@ git diff --stat -- .cnb/docker/Dockerfile.chromium
 
 处置分三种：升级到已修复版本（换 Alpine 版本或换包）；确认是上游尚未修复的 CVE，那它不该在这个 PR 里解决，按 [安全基线](security-baseline.md) 的链条等上游；确认是误报后再动扫描配置。Chromium 依赖多，这类红灯里「上游未修的 Chromium / `nss` / `freetype` CVE」占比不低，不要为了过门禁注释掉 `failOnSeverity`——push 侧的全量报告会失去对照基线。
 
-顺带说明：PR 触发的 `validate-chromium` 只做一次 amd64 构建加三步冒烟（版本、`--dump-dom about:blank`、时区），不推送镜像；它跟 SCA 是两道独立的门。
+顺带说明：构建流水线只有手动与定时两个入口，PR 不会触发镜像构建，因此没有「PR 上跑一次 amd64 构建」的兜底；改完 Dockerfile 要么本地构建一次，要么手动触发流水线验证。
 
 ### AI 评审只评论不阻断
 

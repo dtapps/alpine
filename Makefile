@@ -53,3 +53,30 @@ format-docker:
 	@echo "[Format] 格式化 Dockerfile..."
 	@find .cnb .github -type f -name "Dockerfile*" -exec dockerfmt -w -n {} + || { echo "❌ dockerfmt 格式化失败"; exit 1; }
 	@echo "[Format] Dockerfile 格式化完成（dockerfmt）。"
+
+# 拉取所有远程最新（先 CNB，后 GitHub 镜像）然后强制推送
+sync: sync-cnb sync-github push-force
+
+# 拉取 CNB 最新并以 fast-forward 合并（保留本地未提交改动）
+sync-cnb:
+	git fetch origin
+	git merge --ff-only origin/main
+	@echo "已同步 origin/main 最新代码，本地未提交改动已保留"
+
+# 拉取 GitHub 最新并以 fast-forward 合并（保留本地未提交改动）
+sync-github:
+	git fetch github
+	git merge --ff-only github/main
+	@echo "已同步 github/main 最新代码，本地未提交改动已保留"
+
+# 推送到所有远程仓库
+push: 
+	git push origin HEAD
+	git push github HEAD
+	@echo "推送完成！"
+
+# 强制推送到所有远程仓库（忽略冲突）
+push-force:
+	git push --force origin HEAD
+	git push --force github HEAD
+	@echo "强制推送完成！"

@@ -15,15 +15,15 @@ Alpine 镜像的完整文档在 [`index.md`](index.md)：快速上手、Dockerfi
 | **Alpine 基础镜像**（本篇）      | `docker.cnb.cool/dtapp/alpine`          | `.cnb/docker/Dockerfile.alpine`                          | 本 README + [`index.md`](index.md)        |
 | Alpine + Chromium 无头浏览器镜像 | `docker.cnb.cool/dtapp/alpine/chromium` | `.cnb/docker/Dockerfile.chromium`、`Dockerfile.headless` | [`docs/chromium/`](../chromium/README.md) |
 
-两者互不依赖（Chromium 镜像基于官方 `alpine`，不基于本仓库的 Alpine 基础镜像），标签空间也互不重叠：Chromium 的标签挂在子路径 `/chromium` 下，不会覆盖 `dtapp/alpine:latest`。仓库总览见[根目录 README](../../README.md)。
+两者有依赖：Chromium 镜像 `FROM` 本仓库构建的 Alpine 基础镜像（CI 按 `version` 解析同名标签的 digest 钉住），因此继承基座的时区、源与 `curl` / `drill` / `git` / `nc`；本仓库的 Alpine 基础镜像本身则只用官方 `alpine:latest` 作基座。标签空间互不重叠：Chromium 的标签挂在子路径 `/chromium` 下，不会覆盖 `dtapp/alpine:latest`。仓库总览见[根目录 README](../../README.md)。
 
 ## 镜像里有什么
 
 - 基础镜像：`alpine:latest`。基座刻意跟随上游最新稳定版，定时任务每天重建就自动带上新补丁甚至新小版本；具体是哪个版本由流水线解析后写进标签与元数据（如 `3.25.1`），所以「跟随最新」与「事后可追溯」可以同时成立（追溯靠元数据里的 digest，不靠标签留档）
-- APK 源替换为四个镜像（cernet → 腾讯云 → 阿里云 → 官方）依次回退，且只保留 `main`：本层所有包都在 `main`， `community` 索引约 2.4 MiB，默认白拉
-- 预装工具：`ca-certificates`（HTTPS 校验）、`curl`（调接口）、`drill`（`dig` 的轻量替代，做 DNS 排查）、 `netcat-openbsd`（`nc -zv host port` 探端口）、`tzdata`
+- APK 源：CNB 侧把基座源的主机名替换为腾讯云（保留 `main` + `community` 两行）；GitHub 侧不换源，沿用官方默认的 `main` + `community`
+- 预装工具：`ca-certificates`（HTTPS 校验）、`curl`（调接口）、`drill`（`dig` 的轻量替代，做 DNS 排查）、 `git`（克隆代码）、`netcat-openbsd`（`nc -zv host port` 探端口）、`tzdata`
 - 时区与本地化：`ENV TZ=Asia/Shanghai`、`LANG`/`LC_ALL=C.UTF-8`，同时落盘 `/etc/localtime` 与 `/etc/timezone`。 只设 `TZ` 不够，musl 的时区解析仍依赖 `tzdata` 提供的 zoneinfo
-- 单层 `RUN` 完成「换源 → 装包 → 写时区 → 清缓存」：清理必须与安装同层，跨层 `rm` 只产生 whiteout， 旧层数据照样随镜像分发
+- 单层 `RUN` 完成「换源（仅 CNB）→ 装包 → 写时区 → 清缓存」：清理必须与安装同层，跨层 `rm` 只产生 whiteout， 旧层数据照样随镜像分发
 - 九个 OCI 标签：`source`、`url`（本镜像所在的 CNB 仓库）、`revision`、`created`、`version`、`description`、 `licenses`、`base.name`、`base.digest`。注意 `base.name` 按 OCI 规范指**基座镜像**（`alpine:latest`）， 本镜像自己的存放位置是 `source`/`url`，不是 Docker Hub
 - 不设 `ENTRYPOINT`/`CMD`/`WORKDIR`：基础镜像设了会被所有下游继承，等于替下游做决定
 
@@ -49,7 +49,7 @@ Dockerfile 位于 `.cnb/docker/Dockerfile.alpine`。
 - **同名标签每天被覆盖是刻意的**：alpine 的版本号就是产品的版本号，再叠日期只会让下游不知道该固定哪一个。代价是「昨天那份」没有标签可指，要固定某一次构建只能按 digest 拉取
 - `3.25.1-linux-*` 同样每天被覆盖，它只解决「只认单平台标签的工具」，不承担留档职责
 - `-linux-*`、`latest`、`3.25` 都不是「再构建一次」：脚本用 `docker buildx imagetools create` 把已有清单挂到新名字上，digest 完全相同，不存在「同名标签内容差一点」的可能
-- `latest` 与 `3.25` 只在冒烟测试通过后提升。六项断言覆盖：`/etc/alpine-release` 前缀等于解析出的版本、`/etc/timezone` 为 `Asia/Shanghai`、`date +%z` 为 `+0800`、`/etc/apk/repositories` 恰好 4 行、`curl`/`drill`/`nc`/`nslookup` 四个命令可执行、OCI 标签 `version` 等于本次版本标签名。任一项失败脚本 `exit 1`，`3.25` 与 `latest` 停在原地（版本标签此时已指向那份坏产物，但按这两个标签拉的人不受影响）
+- `latest` 与 `3.25` 只在冒烟测试通过后提升。六项断言覆盖：`/etc/alpine-release` 前缀等于解析出的版本、`/etc/timezone` 为 `Asia/Shanghai`、`date +%z` 为 `+0800`、`/etc/apk/repositories` 恰好 2 行、`curl`/`drill`/`git`/`nc`/`nslookup` 五个命令可执行、OCI 标签 `version` 等于本次版本标签名。任一项失败脚本 `exit 1`，`3.25` 与 `latest` 停在原地（版本标签此时已指向那份坏产物，但按这两个标签拉的人不受影响）
 - `latest` 与 `3.25` 是「最近一次成功构建」的指针，会被覆盖；要锁死某个产物只能按 digest 拉取，细节见 [镜像与标签](images-and-tags.md)
 
 ### 标签名怎么拆
@@ -76,7 +76,7 @@ Dockerfile 位于 `.cnb/docker/Dockerfile.alpine`。
 
 - `3.24.3`、`3.24`、`latest` 三个名字指向**同一个 digest**（后两个是提升出来的别名），所以列表里它们的大小完全相同，不是重复构建。
 - 单平台标签不是重新构建的产物，只是给 index 里的条目挂了个名字；在错误架构上拉会失败，跨架构请用 `3.24.3` / `latest`。
-- 本镜像没有变体维度，也没有 `buildcache*`（Chromium 镜像有，那是 buildx 缓存、不是镜像）。
+- 本镜像没有变体维度，也不使用 registry 缓存，因此不会出现 `buildcache*`；Chromium 镜像现在同样如此。
 
 ### 制品库列表里的标签与数字怎么读
 
@@ -113,7 +113,7 @@ FROM docker.cnb.cool/dtapp/alpine:latest
 - 手动：仓库页面 → 流水线 → 点击「打包 Alpine 镜像（多架构 amd64 + arm64）」按钮。`version` 可留空（等价于 `latest`，跟随上游），也可填 `3.25`、`3.25.1` 或 `3.25.1@sha256:<64 位 hex>`
 - 定时：每天 `00:05`（Asia/Shanghai）自动构建。**定时任务没有按钮输入，`version` 传不了**，等价于留空：走 `Dockerfile` 默认的 `alpine:latest`，自动跟随上游补丁与小版本；想钉某个版本（`3.25` / `3.25.1` / digest）只能手动点按钮。
 
-一次 `docker buildx build --platform linux/amd64,linux/arm64 --push` 直接产出多架构 manifest list， 单平台标签与 `latest` 都是在这之后用 `imagetools create` 从版本标签派生的，不存在「先构建、再等两条都完成、 最后合并清单」的时序问题，也不需要额外的合并任务。构建刻意不带 registry 缓存：镜像只有一层，缓存一旦命中 就不会再执行 `apk add`，每天的重建也就装不到新包了；每次多跑几秒「4 个索引 + 5 个包」，换来的是「重建 = 刷新依赖」。
+一次 `docker buildx build --platform linux/amd64,linux/arm64 --push` 直接产出多架构 manifest list， 单平台标签与 `latest` 都是在这之后用 `imagetools create` 从版本标签派生的，不存在「先构建、再等两条都完成、 最后合并清单」的时序问题，也不需要额外的合并任务。构建刻意不带 registry 缓存：镜像只有一层，缓存一旦命中 就不会再执行 `apk add`，每天的重建也就装不到新包了；每次多跑几秒「2 个索引 + 6 个包」，换来的是「重建 = 刷新依赖」。
 
 相关配置：
 
@@ -221,7 +221,7 @@ YAML 的格式化规则在 `.yamlfmt`（缩进 2 空格、保留空行、引号�
 └── .cnb/
     ├── docker/Dockerfile.alpine    # ← 本篇：Alpine 基础镜像定义
     ├── docker/Dockerfile.chromium  # Chromium 镜像定义
-    ├── docker/Dockerfile.headless  # Chromium 的 -headless 变体
+    ├── docker/Dockerfile.headless  # 本地派生配方：无头参数 + tini（CI 不发布）
     ├── scripts/             # 流水线脚本
     ├── workflows/           # 各触发事件的流水线
     ├── security/            # 安全扫描配置

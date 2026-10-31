@@ -4,15 +4,15 @@
 
 ## 镜像里有什么
 
-| 项目     | 值                                                                   |
-|----------|----------------------------------------------------------------------|
-| 镜像地址 | `docker.cnb.cool/dtapp/alpine`                                       |
-| 基础     | 官方 `alpine:latest`（跟随上游 latest-stable，构建时解析成具体版本） |
-| 平台     | linux/amd64、linux/arm64（多架构 index + 派生的单平台标签）          |
-| 预装     | `ca-certificates`、`curl`、`drill`、`netcat-openbsd`、`tzdata`       |
-| 时区     | `Asia/Shanghai`（`/etc/localtime`、`/etc/timezone`、`TZ` 三者配套）  |
-| 用户     | root，未创建非 root 用户（生产镜像由下游自行降权）                   |
-| 入口     | 无 `ENTRYPOINT` / `CMD` / `HEALTHCHECK`，由下游镜像自己声明          |
+| 项目     | 值                                                                    |
+|----------|-----------------------------------------------------------------------|
+| 镜像地址 | `docker.cnb.cool/dtapp/alpine`                                        |
+| 基础     | 官方 `alpine:latest`（跟随上游 latest-stable，构建时解析成具体版本）  |
+| 平台     | linux/amd64、linux/arm64（多架构 index + 派生的单平台标签）           |
+| 预装     | `ca-certificates`、`curl`、`drill`、`git`、`netcat-openbsd`、`tzdata` |
+| 时区     | `Asia/Shanghai`（`/etc/localtime`、`/etc/timezone`、`TZ` 三者配套）   |
+| 用户     | root，未创建非 root 用户（生产镜像由下游自行降权）                    |
+| 入口     | 无 `ENTRYPOINT` / `CMD` / `HEALTHCHECK`，由下游镜像自己声明           |
 
 基座默认跟随上游 `latest`，所以同一个标签隔几周再拉，里面的 alpine 版本可能已经从 `3.25.1` 变成 `3.25.2`——这是有意的，定时任务每天重建就是为了把上游补丁吃进来。「这一份到底是哪个版本」不会丢：版本标签名就是具体版本号（如 `3.25.1`），镜像 label 里还记着当时基座的 digest，commit 元数据里也有一份 `image_digest`。
 
@@ -61,27 +61,27 @@ docker run --rm docker.cnb.cool/dtapp/alpine:latest sh -c '
   date +%Z
   cat /etc/timezone
   cat /etc/apk/repositories
-  command -v curl nc drill nslookup
+  command -v curl nc drill git nslookup
 '
 ```
 
 每一项对应镜像里的一段设计：
 
-| 命令                                | 期望结果             | 验证什么                       |
-|-------------------------------------|----------------------|--------------------------------|
-| `cat /etc/alpine-release`           | 形如 `3.25.1`        | 基座版本（跟随上游时会变）     |
-| `date +%Z`                          | `CST`                | `tzdata` 与时区链接已生效      |
-| `cat /etc/timezone`                 | `Asia/Shanghai`      | 依赖该文件识别时区的程序能读到 |
-| `cat /etc/apk/repositories`         | 四行，且都是 `/main` | 源配置没有被写坏               |
-| `command -v curl nc drill nslookup` | 四个路径都有输出     | 预装工具都在                   |
+| 命令                                    | 期望结果                                                     | 验证什么                       |
+|-----------------------------------------|--------------------------------------------------------------|--------------------------------|
+| `cat /etc/alpine-release`               | 形如 `3.25.1`                                                | 基座版本（跟随上游时会变）     |
+| `date +%Z`                              | `CST`                                                        | `tzdata` 与时区链接已生效      |
+| `cat /etc/timezone`                     | `Asia/Shanghai`                                              | 依赖该文件识别时区的程序能读到 |
+| `cat /etc/apk/repositories`             | `main` + `community` 两行：CNB 主机是腾讯云，GitHub 是官方源 | 源配置没有被写坏               |
+| `command -v curl nc drill git nslookup` | 五个路径都有输出                                             | 预装工具都在                   |
 
 网络能力单独验一遍（镜像的卖点就是「进容器能排查」，这三条命令分别覆盖 HTTPS、端口、DNS）：
 
 ```bash
 docker run --rm docker.cnb.cool/dtapp/alpine:latest sh -c '
-  curl -sSI https://mirrors.aliyun.com | head -1
-  nc -zv mirrors.aliyun.com 443
-  drill mirrors.aliyun.com | head -5
+  curl -sSI https://mirrors.cloud.tencent.com | head -1
+  nc -zv mirrors.cloud.tencent.com 443
+  drill mirrors.cloud.tencent.com | head -5
 '
 ```
 

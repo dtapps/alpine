@@ -15,7 +15,7 @@ branch:
             type: input
             default: ''
       - name: 打包 Chromium 镜像（多架构 amd64 + arm64）
-        description: 构建并推送 default / -cjk / -headless 三个变体到 <registry>/<仓库 slug>/chromium
+        description: 构建并推送 Chromium 镜像到 <registry>/<仓库 slug>/chromium；标签与 Alpine 基座一致（<alpine 版本> / <minor> / latest + 单平台）
         event: web_trigger_build_chromium # 触发的 CI 事件名
         permissions:
           roles:
@@ -24,7 +24,7 @@ branch:
             - developer
         inputs:
           version:
-            description: 选填。留空 = latest；也可填 Alpine 版本 3.24 / 3.24.3（不是 Chromium 版本）
+            description: 选填。留空 = 跟随基座 latest；也可填 Alpine 版本 3.24 / 3.24.3（不是 Chromium 版本）。产物标签用解析出的实际版本
             required: false
             type: input
             default: ''
