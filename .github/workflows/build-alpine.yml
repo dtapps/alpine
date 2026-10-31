@@ -73,7 +73,7 @@ jobs:
       - name: 安装 QEMU（跨架构构建 arm64）
         # arm64 那一层 apk add 在 amd64 runner 上靠 binfmt/QEMU 执行；
         # 没有这一步 buildx 会在 arm64 阶段报 exec format error。
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
 
