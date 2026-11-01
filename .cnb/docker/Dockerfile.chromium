@@ -37,15 +37,16 @@ ARG CHROMIUM_BASE_DIGEST=unknown
 #   EXPECTED_CHROMIUM_MAJOR：期望的 Chromium 主版本。默认空 = 不校验，跟随
 #     上游（每天重建自动吃到新版本）；填具体主版本号才断言，避免「镜像内容
 #     变了但没人发现」；构建非默认 Alpine 分支时按实际版本填。
-#   CACHE_BUST：装包层的缓存击穿点。GitHub 侧每天传新值，保证 gha 缓存
-#     不会把上游补丁挡在外面；CNB 侧不启用缓存，保持默认 0。
+#   APK_INDEX_DIGEST：装包层的缓存击穿点。CI 在基座容器里 apk update 后对
+#     APKINDEX 求 sha256 再传进来：索引不变 → 缓存命中，任何包升级 → 重装。
+#     比「按天击穿」精确：没变化时不会白装 184 个包 / 761 MiB。
 #   BUILD_DATE / BUILD_REVISION：写进 OCI 标签，由 CI 传入。
 # -------------------------------------------------------------------
 ARG WITH_CJK=0
 ARG WITH_CHROMEDRIVER=0
 ARG WITH_SWIFTSHADER=0
 ARG EXPECTED_CHROMIUM_MAJOR=
-ARG CACHE_BUST=0
+ARG APK_INDEX_DIGEST=0
 ARG BUILD_DATE=unknown
 ARG BUILD_REVISION=unknown
 
@@ -80,7 +81,7 @@ RUN sed -i 's@dl-cdn.alpinelinux.org@mirrors.cloud.tencent.com@g' /etc/apk/repos
 # 关于 font-freefont：它不含任何 CJK 字形（实测 12 个 otf 的 cmap 里
 #   汉字/假名/谚文码位为 0），中文渲染必须装 font-noto-cjk（WITH_CJK=1）。
 # ===================================================================
-RUN echo "cache-bust: ${CACHE_BUST}" \
+RUN echo "apk-index: ${APK_INDEX_DIGEST}" \
     && apk add --no-cache \
       chromium \
       ca-certificates \

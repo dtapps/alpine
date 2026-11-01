@@ -72,7 +72,7 @@ docs/
 ## 约定
 
 - 提交前跑 `make format`（yamlfmt / markdownfmt / shfmt / dockerfmt）与 `make lint-shell`；范围包含 `.cnb/` 与 `.github/` 两侧的脚本、Dockerfile 与 workflow。
-- 标签是对外契约：改名或删除标签要先按各镜像 `images-and-tags.md` 里的兼容流程走；制品库列表里「多架构 / 单平台」和「压缩后 vs 解压后」的口径，见两个镜像 README 的「制品库列表里的标签与数字怎么读」一节。两个镜像都不使用 registry 缓存，列表里不会出现 `buildcache*`。
+- 标签是对外契约：改名或删除标签要先按各镜像 `images-and-tags.md` 里的兼容流程走；制品库列表里「多架构 / 单平台」和「压缩后 vs 解压后」的口径，见两个镜像 README 的「制品库列表里的标签与数字怎么读」一节。两个镜像都使用 registry 缓存，列表里会各多一个 `buildcache` 缓存清单，它不是可拉取的镜像标签。
 - 两个平台的 Dockerfile 与脚本是两份副本（`.cnb/` 与 `.github/`）：改镜像内容、标签规则或冒烟断言时两处都要改；只改平台胶水时各改各的。平台层说明见 [docs/cnb.md](docs/cnb.md) 与 [docs/github.md](docs/github.md)。
 - 安全报告走 [SECURITY.md](SECURITY.md)，贡献流程与硬性规则见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 - 文档入口：[docs/README.md](docs/README.md)。

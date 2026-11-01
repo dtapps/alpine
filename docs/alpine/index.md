@@ -29,7 +29,7 @@
 | [build.md](build.md)                             | 本地与 CI 构建、buildx、多架构产物落地方式                  | `.cnb/scripts/build-alpine.sh`                  |
 | [ci-pipeline.md](ci-pipeline.md)                 | 事件矩阵、按钮与权限、imports、插件职责、改流水线步骤       | `.cnb.yml`、`.cnb/web_trigger.yml`、`workflows` |
 | [images-and-tags.md](images-and-tags.md)         | 镜像地址、标签契约、manifest list 与单平台镜像、digest 固定 | 制品库 + 构建脚本                               |
-| [metadata-and-badges.md](metadata-and-badges.md) | 元数据十键、写入链路、徽章、体积统计原理                    | `build-alpine.sh`、`cnbcool/annotations`        |
+| [metadata-and-badges.md](metadata-and-badges.md) | 元数据十二键、写入链路、徽章、体积统计原理                  | `build-alpine.sh`、`cnbcool/annotations`        |
 | [security-baseline.md](security-baseline.md)     | 镜像攻击面、扫描能力、`.scanignore` 原则、凭证管理          | `.scanignore`、`.cnb/security/**`、`sca.yml`    |
 | [maintenance.md](maintenance.md)                 | 补丁节奏、版本升级、验证清单、周期性检查                    | `crontab`、`web_trigger_build_alpine`           |
 | [troubleshooting.md](troubleshooting.md)         | 症状到处置的总表与分主题排查                                | 全仓库                                          |

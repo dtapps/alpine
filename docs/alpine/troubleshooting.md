@@ -4,23 +4,25 @@
 
 ## 症状总表
 
-| 症状                                  | 可能原因                                                         | 处置                                   | 对应文档                             |
-|---------------------------------------|------------------------------------------------------------------|----------------------------------------|--------------------------------------|
-| 脚本报 `version` 非法                 | 输入不是 latest / `3.25` / `3.25.1` / `3.25.1@sha256:<64hex>     | 按白名单改成合法形态                   | [镜像与标签](images-and-tags.md)     |
-| `FROM` 阶段拉不到基础镜像             | `version` 填了不存在的 tag、或到上游网络不通                     | 换真实存在的 tag，用 `latest` 对照网络 | [构建](build.md)                     |
-| 解析不到基座版本                      | 一次性容器拉不到 `alpine:latest`，或读不到版本文件               | 确认 Runner 出网与 docker 服务，重试   | [CI 流水线](ci-pipeline.md)          |
-| `apk add` 拉索引超时或 404            | 新 minor 的 `vX.Y` 路径腾讯云未同步（CNB）、官方源故障（GitHub） | 确认源主机与路径，等同步或临时补源     | [APK 源与网络](mirrors.md)           |
-| buildx 报 bootstrap 失败              | 自建了 `docker-container` builder                                | 删掉自建 builder，用 CNB 内置 builder  | [构建](build.md)                     |
-| push 返回 401 / 403                   | token 缺失或过期 / 无该仓库写权限                                | 核对 `imports` 与 registry 地址        | [CI 流水线](ci-pipeline.md)          |
-| 冒烟失败、`latest` 没更新             | 基座版本前缀不符、时区、源行数、命令缺失或 OCI 标签不符          | 按断言逐项修，修好重跑即可             | [CI 流水线](ci-pipeline.md)          |
-| 元数据里 digest 是 `unknown`          | 取不到 manifest digest，或元数据步骤没跑                         | 手动 `imagetools inspect` 复核         | [构建元数据](metadata-and-badges.md) |
-| 徽章灰色或显示 `unknown`              | key 拼错、annotation 未写入、看错 commit                         | 对照十个 key 与写入步骤                | [构建元数据](metadata-and-badges.md) |
-| 体积显示 `unknown`                    | 取到的清单里没有 `layers` 字段（拿到的是 index）                 | 先按平台清单 digest 再取 `--raw`       | [构建元数据](metadata-and-badges.md) |
-| 单平台标签指向的清单与 index 条目不同 | 派生步骤没用 `imagetools create`（退回成重新构建）               | 核对 digest，重建走派生路径            | [镜像与标签](images-and-tags.md)     |
-| 容器内时间是 UTC                      | 时区未生效，`/etc/localtime` 被覆盖或删了 tzdata                 | 检查时区文件与 `TZ` 变量               | [Dockerfile 解析](dockerfile.md)     |
-| `make format` 报 command not found    | 本机缺四个格式化工具之一                                         | 按工具链文档安装                       | [格式化](formatting.md)              |
-| 页面没有构建按钮 / 点了不触发         | 按钮 `event` 与 workflow 触发键不一致或未 include                | 三处事件名对齐                         | [CI 流水线](ci-pipeline.md)          |
-| PR 被 SCA 拦住                        | `failOnSeverity: high` 命中 high 及以上漏洞                      | 升级包或确认误报，不要关掉门禁         | [安全基线](security-baseline.md)     |
+| 症状                                  | 可能原因                                                         | 处置                                             | 对应文档                               |
+|---------------------------------------|------------------------------------------------------------------|--------------------------------------------------|----------------------------------------|
+| 脚本报 `version` 非法                 | 输入不是 latest / `3.25` / `3.25.1` / `3.25.1@sha256:<64hex>     | 按白名单改成合法形态                             | [镜像与标签](images-and-tags.md)       |
+| `FROM` 阶段拉不到基础镜像             | `version` 填了不存在的 tag、或到上游网络不通                     | 换真实存在的 tag，用 `latest` 对照网络           | [构建](build.md)                       |
+| 解析不到基座版本                      | 一次性容器拉不到 `alpine:latest`，或读不到版本文件               | 确认 Runner 出网与 docker 服务，重试             | [CI 流水线](ci-pipeline.md)            |
+| `apk add` 拉索引超时或 404            | 新 minor 的 `vX.Y` 路径腾讯云未同步（CNB）、官方源故障（GitHub） | 确认源主机与路径，等同步或临时补源               | [APK 源与网络](mirrors.md)             |
+| buildx 报 bootstrap 失败              | 自建了 `docker-container` builder                                | 删掉自建 builder，用 CNB 内置 builder            | [构建](build.md)                       |
+| push 返回 401 / 403                   | token 缺失或过期 / 无该仓库写权限                                | 核对 `imports` 与 registry 地址                  | [CI 流水线](ci-pipeline.md)            |
+| 冒烟失败、`latest` 没更新             | 基座版本前缀不符、时区、源行数、命令缺失或 OCI 标签不符          | 按断言逐项修，修好重跑即可                       | [CI 流水线](ci-pipeline.md)            |
+| 元数据里 digest 是 `unknown`          | 取不到 manifest digest，或元数据步骤没跑                         | 手动 `imagetools inspect` 复核                   | [构建元数据](metadata-and-badges.md)   |
+| 构建日志出现「APK 索引解析失败」      | 一次性容器里 `apk update` 失败（网络或源不可达）                 | 本次自动降级为 `CACHE=off`，修好网络后重跑即可   | [缓存实现](../cache-implementation.md) |
+| 带缓存的构建在推送后失败              | registry 不接受 buildx 缓存清单                                  | 脚本会自动去掉缓存重试；反复出现就传 `CACHE=off` | [缓存实现](../cache-implementation.md) |
+| 徽章灰色或显示 `unknown`              | key 拼错、annotation 未写入、看错 commit                         | 对照十二个 key 与写入步骤                        | [构建元数据](metadata-and-badges.md)   |
+| 体积显示 `unknown`                    | 取到的清单里没有 `layers` 字段（拿到的是 index）                 | 先按平台清单 digest 再取 `--raw`                 | [构建元数据](metadata-and-badges.md)   |
+| 单平台标签指向的清单与 index 条目不同 | 派生步骤没用 `imagetools create`（退回成重新构建）               | 核对 digest，重建走派生路径                      | [镜像与标签](images-and-tags.md)       |
+| 容器内时间是 UTC                      | 时区未生效，`/etc/localtime` 被覆盖或删了 tzdata                 | 检查时区文件与 `TZ` 变量                         | [Dockerfile 解析](dockerfile.md)       |
+| `make format` 报 command not found    | 本机缺四个格式化工具之一                                         | 按工具链文档安装                                 | [格式化](formatting.md)                |
+| 页面没有构建按钮 / 点了不触发         | 按钮 `event` 与 workflow 触发键不一致或未 include                | 三处事件名对齐                                   | [CI 流水线](ci-pipeline.md)            |
+| PR 被 SCA 拦住                        | `failOnSeverity: high` 命中 high 及以上漏洞                      | 升级包或确认误报，不要关掉门禁                   | [安全基线](security-baseline.md)       |
 
 ## 构建阶段
 

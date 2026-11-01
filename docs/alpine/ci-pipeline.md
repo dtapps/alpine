@@ -102,7 +102,8 @@ services:
 5.  登录                         docker login --password-stdin；trap 在退出时删掉 ~/.docker/config.json
 6.  buildx 自检                  version / inspect 两条确认内置 builder 可用
 7.  一次多架构构建               --platform linux/amd64,linux/arm64 --push，只打 -t ${IMAGE}:${STAMP}
-                                 build-arg：ALPINE_VERSION / IMAGE_VERSION=${STAMP} / VCS_REF / BUILD_DATE / BASE_DIGEST
+                                 build-arg：ALPINE_VERSION / IMAGE_VERSION=${STAMP} / VCS_REF / BUILD_DATE / BASE_DIGEST / APK_INDEX_DIGEST
+                                 cache：--cache-from/--cache-to type=registry,ref=${IMAGE}:buildcache,mode=min
 8.  imagetools create            派生 ${STAMP}-linux-amd64 / -linux-arm64，digest 与 index 条目相同
 9.  冒烟测试                     pull 后 amd64 起容器跑六项断言（含基座版本前缀、OCI 标签 version）
 10. 提升                         先 create -t ${MINOR}，再 create -t latest，都指向 ${STAMP}
@@ -119,21 +120,35 @@ services:
 
 提升顺序是「minor 在前、latest 最后」：`3.25` 那次提升失败时，`latest` 一定还指向上一份可用产物，不会出现「minor 没更新但 latest 已经动了」的中间态。
 
-### 为什么不启用 registry 缓存
+### registry 缓存与索引指纹
 
-一个反直觉的取舍：buildx 支持把构建缓存推到制品库（`--cache-from`/`--cache-to type=registry`），让下一个 job 直接命中，这里却**刻意不用**。
+buildx 支持把构建缓存推到制品库（`--cache-from`/`--cache-to type=registry`）。这份镜像只有一个 `RUN`，缓存能复用的就是那一层，所以关键是**让这一层的缓存键跟着上游真实变化**，而不是跟着日期变化。
 
-原因是这份镜像只有一个 `RUN`：缓存能复用的就是那一层，一旦命中，`apk add` 整段都不会再执行——索引不刷新、 包不重新解析。于是每日 00:05 的定时构建会永远装到启动缓存那天的包，`v3.25` 仓库里后来发布的包级安全补丁一个也进不来，而这恰恰是定时重建存在的全部理由。
+做法是把 APK 仓库索引压缩成指纹：
 
-省下来的成本很小：不带缓存时每次多跑的是「2 个索引 + 6 个包」的下载与解包，实测秒级；可复用的层本来也只有 一层，谈不上多少命中收益。所以这里的选择是：
+1. 构建前在基座容器里跑一次 `apk update`；
+2. 对 `/var/cache/apk/APKINDEX.*` 求 `sha256`，得到 `APK_INDEX_DIGEST`；
+3. 作为 `--build-arg` 传进去，Dockerfile 里 `echo "apk-index: ${APK_INDEX_DIGEST}"` 写进装包层的命令文本。
 
-| 取舍     | 带 registry 缓存           | 不带缓存（当前选择）                   |
-|----------|----------------------------|----------------------------------------|
-| 构建耗时 | 命中后只推一层，最快       | 每次多几秒索引与装包                   |
-| 依赖刷新 | 命中即冻结，包级补丁进不来 | 每次重建都重新解析索引，装到当时最新   |
-| 可复现性 | 同 digest 更容易复现       | 靠 `image_digest` + `base_digest` 回查 |
+于是：
 
-「镜像只有一个 RUN」这个前提一旦变了（多阶段构建、拆出独立的装包层），缓存的价值就会回来，那时应当重新评估， 而不是照抄现在的结论。
+| 情况             | 缓存键 | 结果                           |
+|------------------|--------|--------------------------------|
+| 上游仓库没变化   | 不变   | 装包层命中，省掉下载与解包     |
+| 任意包升级       | 变了   | 装包层重跑，`apk add` 拿到新包 |
+| 基座 digest 变化 | 变了   | `FROM` 之后的层全部重建        |
+
+每日 00:05 的定时构建仍然检查上游，但没变化时不再白装「2 个索引 + 6 个包」。缓存 ref 是每个镜像自己的 `<镜像>:buildcache`，Chromium 用另一条，不共用。
+
+解析失败时脚本自动把本次降级成 `CACHE=off`（`--no-cache` 全量重建），不会带着空键去读可能过期的缓存。带缓存的构建如果失败（个别 registry 不接受 buildx 缓存清单），脚本会去掉缓存重试一次。
+
+| 取舍     | 带 registry 缓存（当前选择）           | 不用缓存             |
+|----------|----------------------------------------|----------------------|
+| 构建耗时 | 索引不变时命中，只剩拉基座与冒烟       | 每次多几秒索引与装包 |
+| 依赖刷新 | 索引变化就重跑，包级补丁照样进来       | 每次重建都重新装包   |
+| 可复现性 | 靠 `image_digest` + `base_digest` 回查 | 同上                 |
+
+机制、代码位置与踩坑见 [缓存实现](../cache-implementation.md)。
 
 ### 为什么显式写 --provenance=mode=min --sbom=false
 

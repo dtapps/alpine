@@ -101,7 +101,7 @@ Dockerfile 放在 `.cnb/docker/` 而不是根目录，是为了让 `.cnb/` 自�
 
 所以单平台标签现在直接指向该架构的镜像清单，不再是「带 attestation 的 index」；这也是发布构建统一带 `--provenance=false --sbom=false` 的原因（buildx 版本不支持这两个参数时脚本自动跳过）。
 
-构建用 `--build-arg CHROMIUM_BASE_IMAGE=<基座>@<digest>`（另带 `CHROMIUM_BASE_NAME` / `CHROMIUM_BASE_DIGEST` 供 OCI 标签使用）与 `--build-arg ALPINE_VERSION=<实际版本>`。CNB 侧不启用跨轮次缓存；GitHub 侧用 Actions 缓存并按天传 `CACHE_BUST`（见下）。镜像内容是 Alpine 基础系统（含 `curl` / `drill` / `git` / `nc`） + `chromium` 与它的图形/渲染依赖 + 时区数据，体积在数百 MB 量级（比纯 alpine 大一个数量级），这是 Chromium 依赖带来的预期结果，不是漏清缓存。
+构建用 `--build-arg CHROMIUM_BASE_IMAGE=<基座>@<digest>`（另带 `CHROMIUM_BASE_NAME` / `CHROMIUM_BASE_DIGEST` 供 OCI 标签使用）与 `--build-arg ALPINE_VERSION=<实际版本>`。两个平台都用 registry 缓存（`<镜像>:buildcache`，`mode=min`），装包层的缓存键里带 `APK_INDEX_DIGEST`（见下）。镜像内容是 Alpine 基础系统（含 `curl` / `drill` / `git` / `nc`） + `chromium` 与它的图形/渲染依赖 + 时区数据，体积在数百 MB 量级（比纯 alpine 大一个数量级），这是 Chromium 依赖带来的预期结果，不是漏清缓存。
 
 `version` / `ALPINE_VERSION` 决定解析哪个基座标签，**具体 Chromium 版本由该基座 Alpine 版本的软件包仓库决定**，构建脚本没有也不该有「指定 Chromium 版本」的参数。
 
@@ -121,7 +121,7 @@ Dockerfile 放在 `.cnb/docker/` 而不是根目录，是为了让 `.cnb/` 自�
 
 ### 装包层的缓存与补丁
 
-装包层前面有一行 `echo "cache-bust: ${CACHE_BUST}"`。GitHub 侧在 CI 里传 `date -u +%Y%m%d`，按天击穿 Actions 缓存：否则缓存命中时 `apk add` 不会重跑，上游补丁就永远进不了镜像。改 Dockerfile 其它部分不会连带重装 chromium，因为击穿点只在这一层之前。CNB 侧不启用缓存，`CACHE_BUST` 保持默认 0，每轮都真的重新装包。
+装包层第一条命令是 `echo "apk-index: ${APK_INDEX_DIGEST}"`。CI 在基座容器里 `apk update` 后对 `APKINDEX` 求 `sha256`，作为 `--build-arg` 传进来：索引不变 → 整层命中；任何包升级 → 值变化 → `apk add` 重跑，上游补丁自然进来。改 Dockerfile 其它部分不会连带重装 chromium，因为击穿点只在这一层。这取代了旧的 `CACHE_BUST` 按天击穿：不再依赖日期，也不会在「上游没变」时白装 761 MiB。机制见[缓存实现](../cache-implementation.md)。
 
 构建流水线只有手动与定时两个入口，没有 PR 校验：改坏 Dockerfile 要等下一次手动触发或次日定时任务才会暴露。需要提前验证时，可以按 [README](README.md) 里的本地构建命令跑一次 amd64 构建加三次冒烟（`chromium --version`、`--dump-dom about:blank`、`date +%Z` 为 `CST`）；本地不传 `CHROMIUM_BASE_IMAGE`，基座是官方 `alpine`，不需要私有仓库。
 
@@ -129,7 +129,7 @@ Dockerfile 放在 `.cnb/docker/` 而不是根目录，是为了让 `.cnb/` 自�
 
 ## 产物与提交的映射
 
-- 每个成功构建把 `chromium_image_digest`、`chromium_image_digest_short`、`chromium_image_size`、`chromium_image_size_arm64`、`chromium_base_image`、`chromium_base_digest`、`chromium_version`、`chromium_built_at` 写到**当前 commit** 的元数据上。
+- 每个成功构建把 `chromium_image_digest`、`chromium_image_digest_short`、`chromium_image_size`、`chromium_image_size_arm64`、`chromium_base_image`、`chromium_base_digest`、`chromium_apk_index_digest`、`chromium_cache`、`chromium_version`、`chromium_built_at` 写到**当前 commit** 的元数据上。
 - 因此「某个提交对应哪个镜像」可以反查：Commit 列表 → 元数据，或 `https://cnb.cool/dtapp/alpine/-/badge/annotation/commit/latest/{key}`。
 - 重跑同一提交会覆盖同名 key，只保留最后一次构建的结果；需要长期固定某个产物时，应按 digest 拉取。
 - 标签会移动（`latest` 每天 `01:05` 更新一次，取当天 `00:05` 产出的基座），digest 不会；这是下游选择「标签还是 digest」的根本区别。需要固定 Chromium 版本时更是只能按 digest——版本标签固定的是 Alpine 版本。
@@ -146,7 +146,7 @@ Dockerfile 放在 `.cnb/docker/` 而不是根目录，是为了让 `.cnb/` 自�
 | Dockerfile 放根目录还是 `.cnb/`             | `.cnb/docker/`                                                              | 与流水线配置放在一起，构建时用 `-f` 指定                                                                                                                                                                |
 | 变体是否继续由 CI 发布                      | 否：配方保留，标签不发                                                      | 主镜像保持中性：默认启动参数取决于使用方环境（是否 root、`/dev/shm` 多大），写进主镜像等于替所有下游决定启动方式。需要时用 `WITH_CJK=1` / `Dockerfile.headless` 自行派生，制品库只留一套 5 个标签       |
 | 是否给 Chromium 加主版本断言                | 加（`EXPECTED_CHROMIUM_MAJOR`）                                             | 上游在同一分支里升主版本时必须有人知道：断言让构建显式失败并打印实际版本，处置是更新默认值或传 `any` 跳过；否则就是「镜像内容悄悄变了」                                                                 |
-| 装包层是否按天击穿缓存                      | GitHub 是（`CACHE_BUST` = 当天日期）；CNB 不用缓存                          | 不击穿就会永远命中 gha 缓存，`apk add` 不重跑，上游补丁永远进不来；CNB 每轮重装，不需要击穿，也就不产生 `buildcache*` 标签                                                                              |
+| 装包层缓存怎么失效                          | 按 APK 索引指纹（`APK_INDEX_DIGEST`）                                       | 索引不变就命中，任何包升级就重跑 `apk add`；比按天击穿精确，没变化时不会白装 761 MiB，也不会漏补丁                                                                                                      |
 | `apk add` 显式列哪些包                      | 只列闭包外的 6 个                                                           | 其余 9 个由 chromium 的 `so:` 依赖自动带入，显式声明不增体积、删掉也不减体积；闭包 184 个包 / 761 MiB installed，可剥离内容几乎为零（`chromium-lang` / `chromium-dbg` 本来就没装）                      |
 | 是否预装排障工具（curl 等）                 | 跟随基座：有 `curl` / `drill` / `git` / `nc`，没有 `dig` / `vim` / `python` | 工具集由基座统一提供，Chromium 镜像不额外加装；需要更多工具请基于本镜像派生                                                                                                                             |
 | 无头启动参数是否写进主镜像                  | 不写                                                                        | `--no-sandbox` 取决于使用方是否 root，应由调用方决定；要开箱即用就自行派生 `Dockerfile.headless`                                                                                                        |

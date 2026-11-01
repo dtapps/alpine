@@ -1,6 +1,6 @@
 # 构建元数据与徽章
 
-> 每次构建把版本名、两层 digest（本镜像与基座）、两个平台的体积、两个时间戳写成当前 commit 的元数据，README 徽章从这批 key 取值；这里讲生成链路、十个 key 的语义，以及 `unknown` 是怎么出现的。
+> 每次构建把版本名、两层 digest（本镜像与基座）、APK 索引指纹、两个平台的体积、两个时间戳写成当前 commit 的元数据，README 徽章从这批 key 取值；这里讲生成链路、十二个 key 的语义，以及 `unknown` 是怎么出现的。
 
 ## 链路
 
@@ -49,6 +49,8 @@ stages 第二步：image: cnbcool/annotations:latest
   "alpine_version": "3.25.1",
   "base_image": "alpine:latest",
   "base_digest": "sha256:...",
+  "apk_index_digest": "9f2c…",
+  "cache": "on",
   "image_size": "12.3MB",
   "image_size_arm64": "12.1MB",
   "built_at": "2026-10-30T08:53:44Z",
@@ -64,6 +66,8 @@ stages 第二步：image: cnbcool/annotations:latest
 | `alpine_version`     | 解析出的基座实际版本（不是 `latest`） | 一次性容器里 `cat /etc/alpine-release`，去掉 `-rN` 后缀                   |
 | `base_image`         | 构建时用的基座引用                    | `FROM` 用的那个值，`alpine:${ALPINE_REF}`，默认即 `alpine:latest`         |
 | `base_digest`        | 当时基座引用的 index digest           | `imagetools inspect alpine:${ALPINE_REF} --format '{{.Manifest.Digest}}'` |
+| `apk_index_digest`   | APK 仓库索引的 sha256，装包层的击穿点 | 一次性容器里 `apk update` 后对 `/var/cache/apk/APKINDEX.*` 求 `sha256`    |
+| `cache`              | 本次是否使用 registry 缓存            | `on` / `off`；索引解析失败时脚本会自动降级成 `off`                        |
 | `image_size`         | amd64 单平台压缩体积                  | 该平台镜像清单里各 layer 之和加 config 的 `size`                          |
 | `image_size_arm64`   | arm64 单平台压缩体积                  | 同上                                                                      |
 | `built_at`           | 本次**实际构建时刻**（UTC）           | `date -u +%Y-%m-%dT%H:%M:%SZ`                                             |
@@ -114,7 +118,7 @@ awk -v b=-1 'BEGIN{ if (b < 0) print "unknown"; else printf "%.1fMB", b/1048576 
 ```
 
 - 取不到平台清单 digest、拿到的不是镜像清单（无 `layers`）、或求和结果小于 1 MiB，都输出 `-1`，同时往 stderr 打一行警告说明是哪一种；`-1` 再变成 `unknown`。正常 alpine 镜像不可能小于 1 MB，这个阈值是经验下界。
-- `INDEX_DIGEST` 取不到时写 `unknown`（`image_digest`），前 12 位同理；`BASE_DIGEST` 取不到也写 `unknown`，但它不影响构建——只是这一次没法回查基座 digest。
+- `INDEX_DIGEST` 取不到时写 `unknown`（`image_digest`），前 12 位同理；`BASE_DIGEST` 取不到也写 `unknown`，但它不影响构建——只是这一次没法回查基座 digest。`APK_INDEX_DIGEST` 解析失败时记为 `unknown`，同时把本次的 `cache` 降级成 `off`（全量重建），不会带着空键去读旧缓存。
 - 徽章上的灰色 `unknown` 因此有两种成因：这次构建没取到值，或这个 key 从未被写入过。它不代表 0，也不代表体积很小。
 
 ## 徽章地址
@@ -123,7 +127,7 @@ awk -v b=-1 'BEGIN{ if (b < 0) print "unknown"; else printf "%.1fMB", b/1048576 
 https://cnb.cool/dtapp/alpine/-/badge/annotation/commit/latest/{key}
 ```
 
-README 用了其中四个：`image_size`、`image_size_arm64`、`image_digest_short`、`image_version`；`image_digest`、`alpine_version`、`base_image`、`base_digest`、`built_at`、`source_date` 用同一条路径也能读到，只是没放进徽章行。路径里的 `commit/latest` 指最新提交这一维度，与镜像标签 `latest` 同名但无关。
+README 用了其中四个：`image_size`、`image_size_arm64`、`image_digest_short`、`image_version`；`image_digest`、`alpine_version`、`base_image`、`base_digest`、`apk_index_digest`、`cache`、`built_at`、`source_date` 用同一条路径也能读到，只是没放进徽章行。路径里的 `commit/latest` 指最新提交这一维度，与镜像标签 `latest` 同名但无关。
 
 徽章显示 `unknown` 时的排查顺序：
 

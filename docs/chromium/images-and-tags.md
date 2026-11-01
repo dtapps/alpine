@@ -75,9 +75,9 @@ manifest list 是给认识多架构的客户端用的：`docker pull` 自动按�
 
 边界：单平台标签只承诺那一个架构，在 arm64 上拉 `*-linux-amd64` 会失败；跨架构场景请用 `latest` / `<版本>` 这类多架构标签。
 
-## 变体与缓存标签：已移除
+## 变体与缓存标签
 
-以前一次构建会推三套变体（default / `-cjk` / `-headless`），CNB 还会推 `buildcache*` 层缓存，标签数量是现在的 3～4 倍。现在：
+以前一次构建会推三套变体（default / `-cjk` / `-headless`），标签数量是现在的 3～4 倍。现在：
 
 - **`-cjk` / `-headless` 不再发布**。需要中文字体或内置无头参数时，自行派生：
 
@@ -91,7 +91,7 @@ manifest list 是给认识多架构的客户端用的：`docker pull` 自动按�
     --build-arg BASE_IMAGE=docker.cnb.cool/dtapp/alpine/chromium:latest \
     -t my-chromium:headless .
   ```
-- **`buildcache*` 不再出现**：CNB 侧已移除 registry 缓存（每日重建必须真的重跑 `apk add`，否则上游补丁进不来）；GitHub 侧一直用 Actions 缓存，本来就不占 GHCR 标签。
+- **`buildcache` 是缓存清单，不是镜像标签**：两侧都写自己的 `<镜像>:buildcache`，供下一次构建命中。装包层的缓存键里带 APK 索引指纹，索引不变才命中，任何包升级都会重跑 `apk add`。
 - 默认镜像仍然**不含任何 CJK 字形**：`font-freefont` 实测 12 个 `.otf` 的 cmap 里汉字/假名/谚文码位为 0。要中文必须自行构建 `WITH_CJK=1`，或在派生镜像里 `apk add font-noto-cjk`。
 
 ### 旧标签怎么迁移
@@ -103,7 +103,7 @@ manifest list 是给认识多架构的客户端用的：`docker pull` 自动按�
 | `latest-cjk` / `<version>-cjk`           | 用 `--build-arg WITH_CJK=1` 自行构建，或在派生镜像里装 CJK 字体              |
 | `latest-headless` / `<version>-headless` | 用 `.cnb/docker/Dockerfile.headless` 自行构建，或自己加 `ENV` / `ENTRYPOINT` |
 | `latest-linux-amd64` 等单平台旧名        | 改用 `latest` / `<版本>`（多架构），或 `<版本>-linux-<arch>`                 |
-| `buildcache*`                            | 不需要替代：缓存标签不是镜像                                                 |
+| `buildcache*`                            | 不需要替代：缓存清单不是可拉取的镜像                                         |
 
 `<version>` 的语义也变了：以前它等于你填的基座标签（如 `3.24`），现在它等于解析出的实际 Alpine 版本（如 `3.24.3`）。`3.24` 仍然存在，作为滚动 minor 标签继续移动。
 

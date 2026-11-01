@@ -49,6 +49,7 @@
 - [README.md](../README.md) —— 仓库总览：两个镜像一览、快速使用、仓库结构
 - [cnb.md](cnb.md) —— CNB 平台层：内置变量与地址来源、事件矩阵、按钮/权限、imports、元数据、排错
 - [github.md](github.md) —— GitHub Actions 与 GHCR：两份副本的目录与同步规则、触发矩阵、变量契约、与 CNB 的差异
+- [cache-implementation.md](cache-implementation.md) —— 构建缓存实现：APK 索引指纹、registry 缓存、`CACHE` 开关与回滚
 
 ## 平台与流水线文档
 

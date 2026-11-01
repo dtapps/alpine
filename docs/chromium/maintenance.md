@@ -19,11 +19,11 @@
 
 ## 日常补丁节奏
 
-`Dockerfile` 不锁包版本。CNB 侧**不启用跨轮次缓存**：每日 cron 本来就重新装包，装上的就是当天仓库里的版本——`chromium` 与它自动带入的 9 个渲染依赖（`glib`、`pango`、`gdk-pixbuf`、`gtk+3.0`、`nss`、`freetype`、`harfbuzz`、`libstdc++`、`fontconfig`），以及显式声明的 `ca-certificates`、`font-freefont`、`tzdata`、`tini`。GitHub 侧用 Actions 缓存（`type=gha`，不占 GHCR 标签），并每天传 `CACHE_BUST=$(date -u +%Y%m%d)` 击穿装包层，否则缓存命中时 `apk add` 不重跑，上游补丁进不来。
+`Dockerfile` 不锁包版本。两侧都使用 registry 缓存，但装包层的缓存键里带 APK 索引指纹：索引不变就命中，任何包升级索引就变、`apk add` 重跑。装上的就是当天仓库里的版本——`chromium` 与它自动带入的 9 个渲染依赖（`glib`、`pango`、`gdk-pixbuf`、`gtk+3.0`、`nss`、`freetype`、`harfbuzz`、`libstdc++`、`fontconfig`），以及显式声明的 `ca-certificates`、`font-freefont`、`tzdata`、`tini`。
 
-为什么必须防住「缓存命中导致不重装」：现象很隐蔽——构建全绿、`chromium_built_at` 一直在更新，但 `chromium_image_digest_short` 和包版本一动不动。CNB 直接不用缓存；GitHub 用每日变化的 `CACHE_BUST`。`CACHE_BUST` 只作用于装包层，改 `Dockerfile` 其它部分不会连带重装 Chromium。
+为什么必须防住「缓存命中导致不重装」：现象很隐蔽——构建全绿、`chromium_built_at` 一直在更新，但 `chromium_image_digest_short` 和包版本一动不动。索引指纹解决了这一点：只有「仓库里一个包都没变」时才命中。它只作用于装包层，改 `Dockerfile` 其它部分不会连带重装 Chromium。
 
-基座更新是另一条传导路径：`FROM` 引用里带基座 digest，`00:05` 的基座构建一旦产出新 digest，Chromium 的 `FROM` 及下游层会自动失效，不需要 `CACHE_BUST` 参与。两条路径互补——基座补丁靠 digest，上游 chromium/runtime 补丁靠「不用缓存 / 每日击穿」。
+基座更新是另一条传导路径：`FROM` 引用里带基座 digest，`00:05` 的基座构建一旦产出新 digest，Chromium 的 `FROM` 及下游层会自动失效，不需要索引指纹参与。两条路径互补——基座补丁靠 digest，上游 chromium/runtime 补丁靠「索引变化 → 重装」。
 
 ```bash
 # 有 docker CLI 的机器上确认当前 latest 指向的 digest

@@ -10,6 +10,7 @@ ARG CHROMIUM_BASE_IMAGE=alpine:${ALPINE_VERSION} → 基座引用：CI 传本仓
 FROM ${CHROMIUM_BASE_IMAGE}      → 本仓库 Alpine 基础镜像（默认回落官方 alpine）
 RUN  换源（仅 CNB）                → 第 1 层：把 /etc/apk/repositories 的主机名换成腾讯云
 RUN  装包 + 时区 + 字体缓存 + 版本断言 + 同层清理 → 第 2 层（GitHub 为第 1 层）：体积全在这里
+                                   首条命令 echo APK_INDEX_DIGEST，作为装包层的缓存击穿点
 ENV  TZ / LANG / LC_ALL           → 环境变量：不占层体积
 ENV  CHROME_BIN / PUPPETEER_*     → 环境变量：给下游工具链用
 RUN  adduser chrome + /work       → 第 3 层：预置非 root 用户与挂载点
@@ -101,13 +102,15 @@ GitHub 侧没有这一段：官方源在境外最快，基座默认的 `reposito
 ## STEP 2：包清单与版本断言
 
 ```dockerfile
-RUN echo "cache-bust: ${CACHE_BUST}" \
+RUN echo "apk-index: ${APK_INDEX_DIGEST}" \
     && apk add --no-cache chromium ca-certificates font-freefont fontconfig tzdata tini \
     && if [ "$WITH_CJK" = "1" ]; then apk add --no-cache font-noto-cjk; fi \
     …
 ```
 
 （文件里为了 diff 可读是一个包一行；`if` 用来挂 `WITH_CJK` 这个本地/下游开关，CI 不传它。）
+
+`echo "apk-index: ${APK_INDEX_DIGEST}"` 是缓存键的一部分：CI 在基座容器里 `apk update` 后对 `APKINDEX` 求 `sha256` 传进来，索引不变则整层命中，任何包升级则重跑 `apk add`。它取代了旧的 `CACHE_BUST` 按天击穿，机制见[缓存实现](../cache-implementation.md)。
 
 只显式要 6 个包，其余 9 个由 `chromium` 的 `so:` 依赖自动带入：
 

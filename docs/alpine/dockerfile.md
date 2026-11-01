@@ -1,18 +1,18 @@
 # Dockerfile 解析
 
-> 一百来行（六成是注释）、五个构建参数、一个 `FROM`、一个 `RUN`：装包、写时区、清缓存全部压在同一层里（CNB 侧同一层里还会换成腾讯云源），每一段都在为「体积最小 + 构建快 + 可追溯」让路。
+> 一百来行（六成是注释）、六个构建参数、一个 `FROM`、一个 `RUN`：装包、写时区、清缓存全部压在同一层里（CNB 侧同一层里还会换成腾讯云源），每一段都在为「体积最小 + 构建快 + 可追溯」让路。
 
 ## 结构总览
 
 ```text
 ARG ALPINE_VERSION=latest              → 基座引用，默认跟随上游 latest-stable
 FROM alpine:${ALPINE_VERSION}          → 直接站在官方镜像上
-ARG ALPINE_VERSION / IMAGE_VERSION / VCS_REF / BUILD_DATE / BASE_DIGEST
-                                       → FROM 之后重新声明，供 LABEL 使用
-LABEL org.opencontainers.image.*（9 个）→ OCI 元数据（来源、版本、修订、基座…）
+ARG ALPINE_VERSION / IMAGE_VERSION / VCS_REF / BUILD_DATE / BASE_DIGEST / APK_INDEX_DIGEST
+                                       → FROM 之后重新声明，供装包层与 LABEL 使用
 ENV TZ / LANG / LC_ALL                 → 时区与本地化
 USER root                              → 有意保留 root，理由写在注释里
 RUN  换源（仅 CNB）+ 装包 + 写时区 + 清缓存 → 唯一的一层
+LABEL org.opencontainers.image.*（9 个）→ OCI 元数据（放最后，避免污染缓存键）
 ```
 
 GitHub 侧不换源（官方源在境外最快），`RUN` 里只有装包、写时区、清缓存；其余内容与 CNB 侧一致。结果是「官方 alpine + 1 层」。没有多阶段构建、没有 `scratch`、没有自研二进制，这也是镜像可以被放心当基座的前提。
@@ -49,7 +49,7 @@ docker build -f .cnb/docker/Dockerfile.alpine --build-arg ALPINE_VERSION=3.25.1 
 
 传一个 Docker Hub 上不存在的 tag（例如 `3.99`）会在 `FROM` 阶段直接失败，不会进入后面的 `RUN`；这是最省时间的失败方式。
 
-## 五个 ARG 与 OCI LABEL
+## 六个 ARG 与 OCI LABEL
 
 ```dockerfile
 ARG ALPINE_VERSION
@@ -57,14 +57,16 @@ ARG IMAGE_VERSION=dev
 ARG VCS_REF=unknown
 ARG BUILD_DATE=1970-01-01T00:00:00Z
 ARG BASE_DIGEST=unknown
+ARG APK_INDEX_DIGEST=0
 ```
 
-- `FROM` 之前声明的 `ARG` 在构建阶段不可见，必须重新声明一次才能拿来填 `LABEL`。这是 Dockerfile 的既有语义，容易漏。
-- 四个新参数都有安全的默认值：本地随手构建不会因为缺少参数而报错，`dev` / `unknown` / 纪元时间一眼能看出「不是流水线产物」。
+- `FROM` 之前声明的 `ARG` 在构建阶段不可见，必须重新声明一次才能拿来填 `LABEL` 或进装包层。这是 Dockerfile 的既有语义，容易漏。
+- 五个元数据参数都有安全的默认值：本地随手构建不会因为缺少参数而报错，`dev` / `unknown` / 纪元时间一眼能看出「不是流水线产物」。
 - `BASE_DIGEST` 是**当次 `alpine:latest` 的 index digest**，由构建脚本 `imagetools inspect` 解析后传进来。它存在的理由只有一个：`latest` 每天都在动，光有 `base.name="alpine:latest"` 说明不了「这次到底用了哪一份」，加上 digest 才能事后精确指回。本地手搓构建时它会停在 `unknown`，不影响构建。
+- `APK_INDEX_DIGEST` 是**装包层的缓存击穿点**：构建脚本先在基座容器里 `apk update`，再对 `/var/cache/apk/APKINDEX.*` 求 `sha256` 传进来。它通过 `echo` 进 `RUN` 的命令文本，索引不变时缓存命中，任何包升级都会让这一层重跑。本地不传时默认 `0`，行为与改造前一致。
 - `BUILD_DATE` 语义是**源码时间**，不是「构建时刻」：默认值取 `1970-01-01T00:00:00Z`，CI 里显式传 `git log -1 --format=%cI`（最后一次提交时间）。这样「同一份源码 + 同样的参数」得到同样的镜像 config，`docker image inspect` 的 `created` 字段与 `org.opencontainers.image.created` 标签才可比对；写 `$(date)` 会让每次构建的 config digest 都不同，可复现性当场失效。构建那一刻的时间只写进 `.cnb/annotation.json` 的 `built_at`，**不进镜像**——进镜像就等于把「构建机器上什么时候跑的」烧进产物，而这个信息对镜像使用者没有意义，对可复现性却是致命的。
 
-LABEL 写的是 9 个 OCI 标准键，好处是可以直接读，不需要解析构建日志：
+LABEL 写的是 9 个 OCI 标准键，并且**放在文件最后**：`created` / `revision` / `version` 每次构建都会变，放在 `RUN` 之前会让装包层的缓存键跟着每次提交一起变。好处是可以直接读，不需要解析构建日志：
 
 ```bash
 docker image inspect alpine:local --format '{{json .Config.Labels}}'
@@ -97,6 +99,7 @@ CNB 侧：
 
 ```dockerfile
 RUN set -eux; \
+    echo "apk-index: ${APK_INDEX_DIGEST}"; \
     sed -i 's@dl-cdn.alpinelinux.org@mirrors.cloud.tencent.com@g' /etc/apk/repositories; \
     apk add --no-cache \
         ca-certificates curl drill git netcat-openbsd tzdata; \
@@ -109,13 +112,16 @@ GitHub 侧去掉 `sed` 那一行，直接 `apk add`：GitHub runner 在境外，
 
 | 写法                        | 为什么                                         |
 |-----------------------------|------------------------------------------------|
+| `echo "apk-index: ..."`     | 把索引指纹写进本层命令文本，值变则缓存失效     |
 | `sed` 只替换主机名          | 保留基座自带的两行；上游增删仓库时不用跟着改   |
 | `set -eux`                  | 任一条失败即中断；`-x` 让日志留下完整命令      |
 | `main` + `community` 各一行 | 本层包都在 `main`，基座保留 `community` 给下游 |
 | `apk add --no-cache`        | 自带索引拉取，不需要 `apk update`              |
 | 同层装完就删                | 跨层 `rm` 只产生 whiteout，数据照样分发        |
 
-`apk update` 被删掉是这一版最容易被问的地方：它的作用是先取一遍 `APKINDEX`，但 `apk add --no-cache` 自己就会取索引，而且用完即弃、不落盘。先 `apk update` 再 `apk add`，等于把同一批索引下载两遍——在「构建快」这个目标上纯属自找开销。源配置写错的症状也不会因此变难查：`apk add` 报的第一个错就带着出错仓库的 URL，源不可达时会先打 `WARNING`、全部源都失败才退出（见 [APK 源与网络](mirrors.md)），所以看日志要留意 `WARNING` 而不是只看退出码。
+`echo "apk-index: ${APK_INDEX_DIGEST}"` 是缓存键的一部分，不是日志装饰：值一变，BuildKit 就认为这一层要重跑。CI 在构建前用独立容器算好这个值（见 [构建](build.md#缓存与索引指纹)），所以装包层不会因为「命中缓存」而永远装到同一批包。
+
+`apk update` 不在 `RUN` 里，是这一版最容易被问的地方：它的作用是先取一遍 `APKINDEX`，但 `apk add --no-cache` 自己就会取索引，而且用完即弃、不落盘。先 `apk update` 再 `apk add`，等于把同一批索引下载两遍——在「构建快」这个目标上纯属自找开销。CI 需要索引指纹时，会在**另一个一次性容器**里跑 `apk update`，不影响镜像层。源配置写错的症状也不会因此变难查：`apk add` 报的第一个错就带着出错仓库的 URL，源不可达时会先打 `WARNING`、全部源都失败才退出（见 [APK 源与网络](mirrors.md)），所以看日志要留意 `WARNING` 而不是只看退出码。
 
 `sed` 不匹配时就地跳过，文件保持官方源，构建仍能完成；这是刻意留的降级路径，而不是让换源失败拖垮整个构建。
 
@@ -197,6 +203,8 @@ USER app
 - **层数本身就是成本**。每层有独立的 metadata（层的 config、diff id、tar 头），层数越多，镜像清单越大、拉取时的请求数越多；对「一天被拉很多次」的基础镜像，这是复利成本。
 
 所以现在的取向是：**一次 `RUN` 把事做完**。代价是「改包列表会连带重建时区」，但时区那几条命令是纯本地操作，重跑没有网络开销，可以忽略。
+
+跨轮次缓存也建立在这个单层结构上：CI 把 APK 索引指纹作为 `APK_INDEX_DIGEST` 传进来并 `echo` 在本层，索引不变时整层命中，任何包升级时整层重跑。这样「单层」不再意味着「每次都必须重装」，也不再意味着「缓存命中后装不到新包」。机制见 [缓存实现](../cache-implementation.md)。
 
 ## 清理为什么必须与安装同层
 

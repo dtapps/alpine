@@ -10,6 +10,12 @@
 # 写进产物标签与 OCI label：
 #   alpine:latest  ──解析──>  3.25.1  ──打标签──>  3.25.1（每天重建会覆盖同名标签）
 # 需要复现某次构建时，用元数据里记录的 image_digest / base_digest，而不是 latest。
+#
+# 缓存：装包层的缓存键里带 APK_INDEX_DIGEST（构建脚本 apk update 后对 APKINDEX
+# 求的 sha256）。仓库里任何包升级都会让这个值变化、装包层重跑；索引没变则命中。
+# 因此「每天重建 = 刷新依赖」仍然成立，但没变化时不再白装一遍。
+# 元数据 LABEL 放在文件最后：created/revision/version 每次都变，放前面会让
+# 它下面的 RUN 层每天缓存失效。
 # ===================================================================
 
 # -------------------------------------------------------------------
@@ -30,26 +36,14 @@ ARG VCS_REF=unknown
 ARG BUILD_DATE=1970-01-01T00:00:00Z
 # 基础镜像的 manifest digest（CI 解析后传入）：钉住「这次的 alpine:latest 是哪一份」
 ARG BASE_DIGEST=unknown
+# APK 仓库索引指纹（CI 解析后传入）：装包层的缓存击穿点。
+# 脚本在基础镜像容器里 apk update 后对 APKINDEX 求 sha256；索引不变 → 缓存命中，
+# 任何包升级 → 值变化 → apk add 重跑。本地不传时保持 0，不影响构建。
+ARG APK_INDEX_DIGEST=0
 
 # 本镜像所在的代码仓库（OCI source/url）。构建脚本用 GITHUB_REPOSITORY 派生并
 # 传入；不设默认值，本地 docker build 时需自行 --build-arg。
 ARG IMAGE_SOURCE
-
-# -------------------------------------------------------------------
-# OCI 元数据标签
-#   source / url  → 本镜像所在的代码仓库（不是 Docker Hub）
-#   base.*        → 基座是谁：FROM 用的那个 alpine 标签，以及它当次的 digest
-# 注意 base.name 按 OCI 规范指「基础镜像」，不是本镜像的存放位置。
-# -------------------------------------------------------------------
-LABEL org.opencontainers.image.source="${IMAGE_SOURCE}" \
-    org.opencontainers.image.url="${IMAGE_SOURCE}" \
-    org.opencontainers.image.revision="${VCS_REF}" \
-    org.opencontainers.image.created="${BUILD_DATE}" \
-    org.opencontainers.image.version="${IMAGE_VERSION}" \
-    org.opencontainers.image.description="Alpine 基础镜像：ca-certificates + curl + drill + git + nc + Asia/Shanghai 时区" \
-    org.opencontainers.image.licenses="MIT" \
-    org.opencontainers.image.base.name="alpine:${ALPINE_VERSION}" \
-    org.opencontainers.image.base.digest="${BASE_DIGEST}"
 
 # -------------------------------------------------------------------
 # 时区与本地化
@@ -79,6 +73,7 @@ USER root
 #   - 包名按字母序，便于 diff 与评审
 # -------------------------------------------------------------------
 RUN set -eux; \
+    echo "apk-index: ${APK_INDEX_DIGEST}"; \
     apk add --no-cache \
         ca-certificates \
         curl \
@@ -103,3 +98,21 @@ RUN set -eux; \
 # 只需要「能不能解析」：删掉 drill，用 busybox 自带的 nslookup（再省 0.4 MiB）
 # 官方源默认就开着 main + community，需要 community 的包直接 apk add 即可。
 # ===================================================================
+
+# -------------------------------------------------------------------
+# OCI 元数据标签（必须放在所有 RUN 之后）
+#   source / url  → 本镜像所在的代码仓库（不是 Docker Hub）
+#   base.*        → 基座是谁：FROM 用的那个 alpine 标签，以及它当次的 digest
+# 注意 base.name 按 OCI 规范指「基础镜像」，不是本镜像的存放位置。
+# created / revision / version 每次构建都会变；放在文件开头会让它下面所有层
+# （装包、时区、清理）的缓存键跟着变，registry 缓存就永远命不中。
+# -------------------------------------------------------------------
+LABEL org.opencontainers.image.source="${IMAGE_SOURCE}" \
+    org.opencontainers.image.url="${IMAGE_SOURCE}" \
+    org.opencontainers.image.revision="${VCS_REF}" \
+    org.opencontainers.image.created="${BUILD_DATE}" \
+    org.opencontainers.image.version="${IMAGE_VERSION}" \
+    org.opencontainers.image.description="Alpine 基础镜像：ca-certificates + curl + drill + git + nc + Asia/Shanghai 时区" \
+    org.opencontainers.image.licenses="MIT" \
+    org.opencontainers.image.base.name="alpine:${ALPINE_VERSION}" \
+    org.opencontainers.image.base.digest="${BASE_DIGEST}"

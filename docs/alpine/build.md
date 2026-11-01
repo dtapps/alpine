@@ -54,22 +54,25 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ## buildx 常用参数与缓存取舍
 
-| 参数           | 作用            | 本仓库用法                              |
-|----------------|-----------------|-----------------------------------------|
-| `-f`           | 指定 Dockerfile | `.cnb/docker/Dockerfile.alpine`         |
-| `--platform`   | 目标平台        | 一次构建两个平台                        |
-| `--build-arg`  | 传构建参数      | `ALPINE_VERSION` + 四个元数据参数       |
-| `--push`       | 构建完直接推送  | CI 唯一的落地方式                       |
-| `--provenance` | 附加证明清单    | `mode=min`，压掉多余的 attestation 条目 |
-| `--sbom`       | 附加 SBOM 清单  | `false`，同上                           |
+| 参数           | 作用             | 本仓库用法                              |
+|----------------|------------------|-----------------------------------------|
+| `-f`           | 指定 Dockerfile  | `.cnb/docker/Dockerfile.alpine`         |
+| `--platform`   | 目标平台         | 一次构建两个平台                        |
+| `--build-arg`  | 传构建参数       | `ALPINE_VERSION` + 六个元数据/缓存参数  |
+| `--push`       | 构建完直接推送   | CI 唯一的落地方式                       |
+| `--cache-from` | 读 registry 缓存 | `<镜像>:buildcache`，存在时才传         |
+| `--cache-to`   | 写 registry 缓存 | `<镜像>:buildcache,mode=min`            |
+| `--provenance` | 附加证明清单     | `mode=min`，压掉多余的 attestation 条目 |
+| `--sbom`       | 附加 SBOM 清单   | `false`，同上                           |
 
-缓存与「刻意不缓存」：
+### 缓存与索引指纹
 
-- 同一个 builder 内的 BuildKit 层缓存自动复用，这是本地反复构建同一条命令很快的原因。CI 每次都是新 runner，这层缓存基本用不上。
-- 缓存键由「本层指令 + 上层内容」算出，所以 Dockerfile 的段落顺序直接决定复用率：换源、装包、写时区、清理压在同一层里，改包列表必然重建这一整层——这是有意的取舍，理由见 [Dockerfile 解析](dockerfile.md#为什么只有一个-run)。
-- **CI 刻意不启用 registry 缓存**（没有 `--cache-from` / `--cache-to`，也不会产生 `:buildcache` 这样的标签）。理由不是「忘了配」，而是这套缓存对本镜像有害：镜像只有一个 `RUN`，registry 缓存能复用的就是这一层，一旦命中，`apk add` 根本不会执行——每日 cron 会永远装到同一批包，上游在分支里发布的包级安全补丁永远进不来，「构建成功」会变成「构建没做事」。基座跟随 `latest` 之后这一点更要紧：`FROM` 已经换了新 digest，那一层要是命中旧缓存，镜像内容会和标签上的版本号对不上。
-- 不启用缓存的代价很小：每次多跑一遍「2 个索引 + 6 个包」，实测是秒级；而镜像本来就只有一个层、一次构建，没有「多层重复编译」那种值得优化的东西。换来的是**「每天重建 = 真的刷新依赖」**这个语义，对基础镜像来说这笔交换明显划算。
-- 需要快的时候，能指望的只有本地 BuildKit 层缓存与单层结构本身：本地反复构建时同一条命令会命中缓存，改 Dockerfile 才会真正重跑那一层。
+- 同一个 builder 内的 BuildKit 层缓存自动复用，这是本地反复构建同一条命令很快的原因。
+- 缓存键由「本层指令 + 上层内容 + build-arg」算出，所以 Dockerfile 的段落顺序直接决定复用率：换源、装包、写时区、清理压在同一层里，改包列表必然重建这一整层。
+- **CI 使用 registry 缓存**：每个镜像写自己的 `<镜像>:buildcache`（`mode=min`），构建前先 `imagetools inspect` 探测它是否存在，存在才加 `--cache-from`。第一次构建只写不读。
+- **缓存失效靠 APK 索引指纹，而不是日期**：脚本在基座容器里 `apk update`，对 `/var/cache/apk/APKINDEX.*` 求 `sha256`，作为 `--build-arg APK_INDEX_DIGEST` 传进来；Dockerfile 里 `echo "apk-index: ${APK_INDEX_DIGEST}"` 把它写进装包层的命令文本。索引不变 → 整层命中；任何包升级 → 整层重跑。因此「每天重建 = 刷新依赖」仍然成立，但没变化时不会白装一遍。
+- 解析失败时脚本自动把本次降级成 `CACHE=off`（`--no-cache` 全量重建），不会带着空键去读可能过期的缓存。手动回滚也用它：`CACHE=off`。
+- 带缓存的构建如果失败（个别 registry 不接受 buildx 缓存清单），脚本会去掉缓存重试一次，避免当天的构建白跑。
 - `--provenance` 与 `--sbom` 默认都开，会产生额外的 attestation 清单，这些清单不占层体积，但会混进 `imagetools inspect` 的输出。所以体积统计必须先定位到平台镜像清单再对 `layers` 求和，不能对 index 的各个条目直接相加——拿到手的会是「清单 JSON 自身」的一两 KB。CI 里显式传 `--provenance=mode=min --sbom=false`，把这类噪声压到最小。
 
 ## CI 构建脚本逐段
@@ -88,8 +91,10 @@ docker buildx build --platform linux/amd64,linux/arm64 \
    冒烟失败时 latest / minor 不动，对外契约不受影响。
 4. 必须 source 执行：##[set-output] 与 export 只在当前 shell 生效，
    用 `sh build-alpine.sh` 跑会静默丢掉这两件事。
-5. 不启用 registry cache：唯一那层 RUN 一旦命中缓存就不会再执行 apk add，
-   每日 cron 会永远装到同一批包。宁可每次多跑几秒，也要让「重建=刷新依赖」。
+5. registry 缓存按「上游是否真的变了」失效：装包层的缓存键里带 APK 索引
+   指纹（apk update 后对 APKINDEX 求 sha256）。索引不变就命中；任何包升级
+   就重跑 apk add。每日 cron 仍然检查上游，但没变化时不再白装一遍。
+   CACHE=off 可退回全量重建。
 ```
 
 1. **环境检查**：`CNB_DOCKER_REGISTRY`、`CNB_REPO_SLUG_LOWERCASE`、`CNB_TOKEN_USER_NAME`、`CNB_TOKEN` 缺一个就在开跑前停下（`: "${VAR:?}"`），而不是等 `docker login` 报一个含糊的 401。`trap cleanup EXIT` 负责在结束时删掉 `${HOME}/.docker/config.json`。
@@ -143,13 +148,17 @@ printf '%s' "${CNB_TOKEN}" \
 
 ```bash
 docker buildx build -t "${IMAGE}:${STAMP}" --platform linux/amd64,linux/arm64 \
+  --pull \
   --build-arg "ALPINE_VERSION=${ALPINE_REF}" --build-arg "IMAGE_VERSION=${STAMP}" \
   --build-arg "VCS_REF=${VCS_REF}" --build-arg "BUILD_DATE=${BUILD_DATE}" \
   --build-arg "BASE_DIGEST=${BASE_DIGEST}" \
+  --build-arg "APK_INDEX_DIGEST=${APK_INDEX_DIGEST}" \
+  --cache-from "type=registry,ref=${IMAGE}:buildcache" \
+  --cache-to "type=registry,ref=${IMAGE}:buildcache,mode=min" \
   --provenance=mode=min --sbom=false -f "${DOCKERFILE}" --push .
 ```
 
-一次构建两个平台，而不是「多架构 + 两次单平台」三次构建：arm64 那次在 amd64 runner 上要靠 QEMU 模拟重跑一遍 `apk add`，是三次构建里最贵的一次，而它产出的内容与多架构构建里的 arm64 条目本来就一样。命令里也没有 `--cache-from/--cache-to`，这是刻意的，理由见上一节。
+一次构建两个平台，而不是「多架构 + 两次单平台」三次构建：arm64 那次在 amd64 runner 上要靠 QEMU 模拟重跑一遍 `apk add`，是三次构建里最贵的一次，而它产出的内容与多架构构建里的 arm64 条目本来就一样。`--cache-from` 只在 `<镜像>:buildcache` 已存在时才传（脚本先 `imagetools inspect` 探测），第一次构建只写不读。
 
 注意 `ALPINE_VERSION` 传的是 `ALPINE_REF`（可能是 `latest`、`3.25`，也可能是 `3.25.1@sha256:...` 原样），不是解析后的 `ALPINE_REAL`：`FROM` 要的是「用户想用的那个引用」，位级复现靠的正是把带 digest 的引用原样传进去；解析出来的值只用于标签与 label。
 
@@ -190,7 +199,7 @@ docker buildx build -t "${IMAGE}:${STAMP}" --platform linux/amd64,linux/arm64 \
 
 `##[set-output]` 也在这里输出：`interior_version=${ALPINE_REAL}`（解析出的具体版本，保留旧 key）、`image_version=${STAMP}`（本产物）。
 
-结果写成 `.cnb/annotation.json`（`image_digest`、`image_digest_short`、`image_version`、`alpine_version`、`base_image`、`base_digest`、`image_size`、`image_size_arm64`、`built_at`、`source_date`），由流水线第二步的 `cnbcool/annotations` 插件（`type: ADD`、`fromJsonFile`）写进当前 commit 元数据，README 徽章从 `/-/badge/annotation/commit/latest/{key}` 读。
+结果写成 `.cnb/annotation.json`（`image_digest`、`image_digest_short`、`image_version`、`alpine_version`、`base_image`、`base_digest`、`apk_index_digest`、`cache`、`image_size`、`image_size_arm64`、`built_at`、`source_date`），由流水线第二步的 `cnbcool/annotations` 插件（`type: ADD`、`fromJsonFile`）写进当前 commit 元数据，README 徽章从 `/-/badge/annotation/commit/latest/{key}` 读。`apk_index_digest` / `cache` 是排查「为什么这次没升级 / 为什么走了全量重建」的直接依据。
 
 两个时间字段别混：`source_date` 是提交时间（`BUILD_DATE`，与镜像 `LABEL` 的 `created` 同值，为了让同一 commit 的两次构建 config 一致），`built_at` 是流水线实际运行的时刻（`BUILT_AT`）。标签不再带日期，**`built_at` 因此是唯一记录「什么时候构建的」的地方**，每次构建都要写，「这份产物是哪天做的」只能来元数据里查。细节见 [构建元数据](metadata-and-badges.md)。
 
@@ -230,6 +239,8 @@ docker pull docker.cnb.cool/dtapp/alpine@sha256:<image_digest>
 | `FROM` 阶段失败          | 钉的版本不存在              | 用真实 tag，或传空走 `latest`                       |
 | `docker login` 返回 401  | token 未注入                | 检查 `imports` 与环境仓库                           |
 | buildx 自检失败          | 缺 buildx、误建了 builder   | 用 `services: docker` 内置的                        |
+| 日志出现「关闭缓存」     | APK 索引解析失败            | 检查网络/源；本次会全量重建，构建仍继续             |
+| 带缓存的构建失败         | registry 不支持缓存清单     | 脚本会自动去掉缓存重试一次；持续失败查制品库权限    |
 | `apk add` 卡住或超时     | 某个源当前不可用            | 按 [APK 源与网络](mirrors.md)                       |
 | 冒烟失败、`latest` 未动  | 基座/时区/源/命令/标签不符  | 看失败断言；版本标签此时指向该产物，可直接 run 排查 |
 | `base_digest` 为 unknown | `imagetools inspect` 没取到 | 确认能访问 Docker Hub registry                      |

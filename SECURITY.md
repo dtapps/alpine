@@ -13,7 +13,7 @@
 | `*-linux-amd64` / `*-linux-arm64` 单平台标签  | 由版本标签 `imagetools create` 派生，同样每天被覆盖                   |
 | 历史镜像（旧 digest）                         | 不回溯修复，用完即弃；只能靠当时记下的 `image_digest` 找回            |
 
-一句话：这个镜像的补丁节奏等于上游 Alpine 的补丁节奏。`FROM alpine:latest` 且不启用构建缓存，所以每次重建既会重新解析包索引、也会跟到上游当天的稳定版：包级补丁与新 point release 最迟次日自动进入镜像。上游已修而你的镜像还是旧 digest 时，重新触发一次构建即可，详见[维护手册](docs/alpine/maintenance.md)。
+一句话：这个镜像的补丁节奏等于上游 Alpine 的补丁节奏。`FROM alpine:latest` 且装包层的缓存键里带 APK 索引指纹，所以每次重建都会重新解析包索引、跟到上游当天的稳定版：索引没变就命中缓存，有任何包升级就重装；包级补丁与新 point release 最迟次日自动进入镜像。上游已修而你的镜像还是旧 digest 时，重新触发一次构建即可，详见[维护手册](docs/alpine/maintenance.md)。
 
 ## 如何报告问题
 
@@ -36,7 +36,7 @@
 
 ## 已有防护
 
-- 每天 `00:05` 重建一次：不启用构建缓存 + `FROM alpine:latest`，包级补丁与新 point release 最迟次日进入镜像
+- 每天 `00:05` 重建一次：装包层按 APK 索引指纹失效 + `FROM alpine:latest`，包级补丁与新 point release 最迟次日进入镜像
 - 构建前校验 `version` 白名单（只接受 `空|latest|3.25|3.25.1|3.25.1@sha256:<64hex>`），避免非法值进入 `FROM` 引用
 - 用户输入与标签名、`FROM` 引用之间没有自由拼接：标签名取的是容器内解析出来的实际版本，`latest` 永远进不了标签，也不会被误写成任意 tag
 - 提升 `latest` 前先跑六项冒烟断言（基座版本前缀、时区、日期偏移、源行数、五个命令、OCI 标签版本），失败则移动标签不动

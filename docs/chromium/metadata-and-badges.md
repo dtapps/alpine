@@ -1,6 +1,6 @@
 # 构建元数据与徽章
 
-> 每次构建把 digest、两个平台的体积、基座信息、Chromium 精确版本、构建时间写成当前 commit 的元数据，README 徽章从这批 key 取值；这里讲生成链路、各 key 的语义、体积为什么按平台分别算，以及 `unknown` 是怎么出现的。本镜像体积在数百 MB 量级，徽章上的数字是压缩后的层体积，不是层数、也不是一次 `docker pull` 的流量。
+> 每次构建把 digest、两个平台的体积、基座信息、APK 索引指纹、Chromium 精确版本、构建时间写成当前 commit 的元数据，README 徽章从这批 key 取值；这里讲生成链路、各 key 的语义、体积为什么按平台分别算，以及 `unknown` 是怎么出现的。本镜像体积在数百 MB 量级，徽章上的数字是压缩后的层体积，不是层数、也不是一次 `docker pull` 的流量。
 
 ## 链路
 
@@ -10,7 +10,7 @@ build-chromium.sh
   ├─ docker buildx imagetools inspect <基座>:<alpine 版本>   解析基座 digest（构建前已完成）
   ├─ imagetools inspect <alpine 版本>@<平台清单 digest> --raw   取该架构镜像清单里 config 与各 layer 的 size
   ├─ docker run <alpine 版本> chromium --version   取浏览器精确版本
-  └─ heredoc 写 .cnb/annotation.json（11 个 key）
+  └─ heredoc 写 .cnb/annotation.json（13 个 key）
           │
           ▼
 stages 第二步：image: cnbcool/annotations:latest
@@ -48,25 +48,29 @@ stages 第二步：image: cnbcool/annotations:latest
   "chromium_image_size_arm64": "398.4MB",
   "chromium_base_image": "docker.cnb.cool/dtapp/alpine:3.24.3",
   "chromium_base_digest": "sha256:...",
+  "chromium_apk_index_digest": "9f2c…",
+  "chromium_cache": "on",
   "chromium_version": "155.0.8059.84",
   "chromium_built_at": "2026-10-30T07:01:12Z",
   "revision": "提交 SHA"
 }
 ```
 
-| key                           | 语义                              | 来源                                                                          |
-|-------------------------------|-----------------------------------|-------------------------------------------------------------------------------|
-| `chromium_image_ref`          | 镜像地址（不含标签）              | 脚本里的 `${IMAGE}`                                                           |
-| `chromium_image_version`      | 本次产物的 Alpine 版本            | 从基座容器读出的实际版本（如 `3.24.3`）                                       |
-| `chromium_image_digest`       | `<alpine 版本>` 多架构 index 摘要 | `imagetools inspect` 的 `Digest:` 行，取不到则退回模板 `{{.Manifest.Digest}}` |
-| `chromium_image_digest_short` | 去掉 `sha256:` 后的前 12 位       | 上面的 digest，只用于徽章                                                     |
-| `chromium_image_size`         | amd64 单平台压缩体积              | 多架构 index 里 amd64 清单的 config 与各 layer 的 `size` 合计                 |
-| `chromium_image_size_arm64`   | arm64 单平台压缩体积              | 同上，换 arm64                                                                |
-| `chromium_base_image`         | 本次构建叠的基座引用              | 脚本解析出的 `<仓库 slug>:<alpine 版本>`                                      |
-| `chromium_base_digest`        | 基座多架构 index 的完整摘要       | `imagetools inspect <基座> --format '{{.Manifest.Digest}}'`                   |
-| `chromium_version`            | 镜像内 Chromium 的精确版本        | `docker run … chromium --version`，取输出第二列                               |
-| `chromium_built_at`           | UTC 构建时间                      | `date -u +%Y-%m-%dT%H:%M:%SZ`                                                 |
-| `revision`                    | 构建对应的提交 SHA                | `CNB_COMMIT` / `GITHUB_SHA`                                                   |
+| key                           | 语义                                | 来源                                                                          |
+|-------------------------------|-------------------------------------|-------------------------------------------------------------------------------|
+| `chromium_image_ref`          | 镜像地址（不含标签）                | 脚本里的 `${IMAGE}`                                                           |
+| `chromium_image_version`      | 本次产物的 Alpine 版本              | 从基座容器读出的实际版本（如 `3.24.3`）                                       |
+| `chromium_image_digest`       | `<alpine 版本>` 多架构 index 摘要   | `imagetools inspect` 的 `Digest:` 行，取不到则退回模板 `{{.Manifest.Digest}}` |
+| `chromium_image_digest_short` | 去掉 `sha256:` 后的前 12 位         | 上面的 digest，只用于徽章                                                     |
+| `chromium_image_size`         | amd64 单平台压缩体积                | 多架构 index 里 amd64 清单的 config 与各 layer 的 `size` 合计                 |
+| `chromium_image_size_arm64`   | arm64 单平台压缩体积                | 同上，换 arm64                                                                |
+| `chromium_base_image`         | 本次构建叠的基座引用                | 脚本解析出的 `<仓库 slug>:<alpine 版本>`                                      |
+| `chromium_base_digest`        | 基座多架构 index 的完整摘要         | `imagetools inspect <基座> --format '{{.Manifest.Digest}}'`                   |
+| `chromium_apk_index_digest`   | APK 仓库索引的 sha256，装包层击穿点 | 基座容器里 `apk update` 后对 `/var/cache/apk/APKINDEX.*` 求 `sha256`          |
+| `chromium_cache`              | 本次是否使用 registry 缓存          | `on` / `off`；索引解析失败时脚本会自动降级成 `off`                            |
+| `chromium_version`            | 镜像内 Chromium 的精确版本          | `docker run … chromium --version`，取输出第二列                               |
+| `chromium_built_at`           | UTC 构建时间                        | `date -u +%Y-%m-%dT%H:%M:%SZ`                                                 |
+| `revision`                    | 构建对应的提交 SHA                  | `CNB_COMMIT` / `GITHUB_SHA`                                                   |
 
 体积值是格式化后的人类可读串（`human_mb` 输出 `%.1fMB`），保留一位小数；`chromium_image_digest_short` 用 `cut -c1-12` 截断，因此只能用于人工核对，不能用于 `docker pull`。
 

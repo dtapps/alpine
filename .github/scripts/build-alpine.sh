@@ -28,8 +28,10 @@
 #      同名标签每天被覆盖，历史只能靠元数据里的 digest 追；冒烟失败时 latest / minor 不动。
 #   4. 必须 source 执行：GITHUB_OUTPUT 与 export 只在当前 shell 生效，
 #      用 `sh build-alpine.sh` 跑会静默丢掉这两件事。
-#   5. 不启用任何层缓存：唯一那层 RUN 一旦命中缓存就不会再执行 apk add，
-#      每日 cron 会永远装到同一批包。宁可每次多跑几秒，也要让「重建=刷新依赖」。
+#   5. registry 缓存按「上游是否真的变了」失效：装包层的缓存键里带 APK 索引
+#      指纹（apk update 后对 APKINDEX 求 sha256）。索引不变就命中；任何包升级
+#      就重跑 apk add。每日 cron 仍然检查上游，但没变化时不再白装一遍。
+#      CACHE=off 可退回全量重建。
 #
 # 依赖：docker buildx（setup-buildx-action 提供）、jq 可选（体积精确求和）。
 # ===================================================================
@@ -45,13 +47,46 @@ EPOCH_DATE="1970-01-01T00:00:00Z"
 MIN_IMAGE_BYTES=1048576
 # 构建元数据落盘位置：workflow 的 Step Summary / artifact 步骤读它
 ANNOTATION_FILE=".github/annotation.json"
+# registry 缓存：每个镜像用自己的 <镜像>:buildcache，不和下游/上游共用
+CACHE_REF_SUFFIX="buildcache"
+CACHE_MODE="min"
 
 # ---------- 输出助手 ----------
 info() { printf '  %s\n' "$*"; }
+warn() { printf '警告: %s\n' "$*" >&2; }
 die() {
   printf '错误: %s\n' "$*" >&2
   exit 1
 }
+
+# ---------- CACHE 开关 ----------
+# on（默认）：读写 <镜像>:buildcache；off：--no-cache 全量重建。
+# 缓存解析失败时脚本会自动把本次降级成 off，不会带着空键去读旧缓存。
+CACHE="${CACHE:-on}"
+case "${CACHE}" in
+  on | off) : ;;
+  *) die "CACHE 只接受 on / off，收到：${CACHE}" ;;
+esac
+
+# ---------- APK 索引指纹 ----------
+# 把「当前仓库里有什么包」压缩成一个确定值：apk update 后对 APKINDEX 求 sha256。
+# 它进 Dockerfile 装包层的命令文本，于是：
+#   索引没变 → 缓存键不变 → 命中；
+#   任何包升级 → 索引变化 → 装包层重跑，拿到新包。
+# 这比「按天击穿」精确：没变化时不会白装一遍，有变化时也不会漏。
+# 解析失败输出空串，调用方据此关闭缓存（宁可全量重建，也不读可能过期的缓存）。
+resolve_apk_index_digest() ( # $1=基础镜像引用 $2=是否换成腾讯云源(1/0)
+  ref=$1
+  mirror=${2:-0}
+  docker run --rm --platform linux/amd64 -e "MIRROR=${mirror}" "${ref}" sh -eu -c '
+    if [ "${MIRROR}" = "1" ]; then
+      sed -i "s@dl-cdn.alpinelinux.org@mirrors.cloud.tencent.com@g" /etc/apk/repositories
+    fi
+    apk update >/dev/null 2>&1
+    printf "APK_INDEX_DIGEST=%s\n" \
+      "$(cat /var/cache/apk/APKINDEX.* 2>/dev/null | sha256sum | cut -d" " -f1)"
+  ' 2>/dev/null | sed -n 's/^APK_INDEX_DIGEST=//p' | tail -n 1 | tr -d '[:space:]'
+)
 
 # ---------- 0. 环境检查与默认值 ----------
 # 与 CNB 侧从内置变量取地址（CNB_DOCKER_REGISTRY + CNB_REPO_SLUG_LOWERCASE）同理：
@@ -148,6 +183,22 @@ BASE_DIGEST="$(docker buildx imagetools inspect "alpine:${ALPINE_REF}" \
 # 滚动 minor 固定取 major.minor（3.25.1 → 3.25，后续把 3.25 指到最新一次）
 MINOR="$(printf '%s' "${ALPINE_REAL}" | cut -d. -f1,2)"
 
+# ---------- 3.5 解析 APK 索引指纹（缓存击穿点） ----------
+# 装包层的缓存键里会带这个值。索引不变 → 命中；任何包升级 → 重跑 apk add。
+# 解析失败就把本次降级成 CACHE=off：宁可全量重建，也不读可能过期的缓存。
+APK_INDEX_DIGEST="disabled"
+if [ "${CACHE}" = "on" ]; then
+  info "解析 APK 仓库索引指纹（缓存击穿点）"
+  APK_INDEX_DIGEST="$(resolve_apk_index_digest "alpine:${ALPINE_REF}" 0)"
+  if [ -z "${APK_INDEX_DIGEST}" ]; then
+    warn "APK 索引解析失败，本次关闭缓存（全量重建）"
+    CACHE="off"
+    APK_INDEX_DIGEST="unknown"
+  else
+    info "APK_INDEX_DIGEST ${APK_INDEX_DIGEST}"
+  fi
+fi
+
 # ---------- 4. 时间戳与标签 ----------
 # BUILD_DATE 取最后一次提交时间而非当前时间：同一份源码重复构建出同样的
 # config/label，同 STAMP 的两次构建才能逐字节比对。
@@ -166,6 +217,8 @@ info "IMAGE       ${IMAGE}"
 info "ALPINE_REF  ${ALPINE_REF}"
 info "ALPINE_REAL ${ALPINE_REAL}"
 info "BASE_DIGEST ${BASE_DIGEST}"
+info "APK_INDEX   ${APK_INDEX_DIGEST}"
+info "CACHE       ${CACHE}"
 info "MINOR       ${MINOR}"
 info "STAMP       ${STAMP}"
 info "SOURCE      ${IMAGE_SOURCE}"
@@ -187,24 +240,58 @@ docker buildx inspect >/dev/null || die "buildx builder 不可用"
 # 直接推到 ${STAMP}（即 alpine 版本）标签；MINOR / latest 在冒烟通过后由 digest 提升。
 # 没有额外的不可变标签：同名标签每天被覆盖，历史只能靠元数据里的 digest 追。
 #
-# 刻意不用缓存（gha / registry 都不用）：本镜像只有一个 RUN，缓存能复用的就是
-# 这一层，一旦命中就再也不会执行 apk add —— 每日 cron 会永远装到同一批包。
-# 代价也只是每次多跑一遍「2 个索引 + 6 个包」（实测秒级）。
+# registry 缓存：每个镜像用自己的 <镜像>:buildcache，mode=min（单阶段构建，
+# 所有层都在最终镜像里，min 足够）。装包层的缓存键里带 APK_INDEX_DIGEST：
+# 上游没变化时命中，有包升级时重跑 apk add。
+CACHE_REF="${IMAGE}:${CACHE_REF_SUFFIX}"
+CACHE_FROM_READY=""
+if [ "${CACHE}" = "on" ]; then
+  if docker buildx imagetools inspect "${CACHE_REF}" >/dev/null 2>&1; then
+    CACHE_FROM_READY=yes
+    info "缓存源 ${CACHE_REF} 可读，本次尝试命中"
+  else
+    info "缓存源 ${CACHE_REF} 还不存在，本次只写不读"
+  fi
+fi
+
+build_image() (
+  mode=$1
+  set -- \
+    -t "${IMAGE}:${STAMP}" \
+    --platform "${PLATFORMS}" \
+    --pull \
+    --build-arg "ALPINE_VERSION=${ALPINE_REF}" \
+    --build-arg "IMAGE_VERSION=${STAMP}" \
+    --build-arg "IMAGE_SOURCE=${IMAGE_SOURCE}" \
+    --build-arg "VCS_REF=${VCS_REF}" \
+    --build-arg "BUILD_DATE=${BUILD_DATE}" \
+    --build-arg "BASE_DIGEST=${BASE_DIGEST}" \
+    --build-arg "APK_INDEX_DIGEST=${APK_INDEX_DIGEST}" \
+    --provenance=mode=min \
+    --sbom=false
+  case "${mode}" in
+    on)
+      if [ -n "${CACHE_FROM_READY}" ]; then
+        set -- "$@" --cache-from "type=registry,ref=${CACHE_REF}"
+      fi
+      set -- "$@" --cache-to "type=registry,ref=${CACHE_REF},mode=${CACHE_MODE}"
+      ;;
+    off) set -- "$@" --no-cache ;;
+    *) : ;;
+  esac
+  set -- "$@" -f "${DOCKERFILE}" --push .
+  docker buildx build "$@"
+)
+
 info "构建 ${IMAGE}:${STAMP}（${PLATFORMS}）"
-docker buildx build \
-  -t "${IMAGE}:${STAMP}" \
-  --platform "${PLATFORMS}" \
-  --build-arg "ALPINE_VERSION=${ALPINE_REF}" \
-  --build-arg "IMAGE_VERSION=${STAMP}" \
-  --build-arg "IMAGE_SOURCE=${IMAGE_SOURCE}" \
-  --build-arg "VCS_REF=${VCS_REF}" \
-  --build-arg "BUILD_DATE=${BUILD_DATE}" \
-  --build-arg "BASE_DIGEST=${BASE_DIGEST}" \
-  --provenance=mode=min \
-  --sbom=false \
-  -f "$DOCKERFILE" \
-  --push . \
-  || die "docker buildx build 失败"
+if [ "${CACHE}" = "off" ]; then
+  build_image off || die "docker buildx build 失败（CACHE=off）"
+elif ! build_image on; then
+  # 有的 registry 不接受 buildx 缓存清单，而且缓存导出是在镜像推完之后才报错。
+  # 去掉缓存重试一次，别让当天的构建白跑。
+  warn "带缓存的构建失败：可能是 registry 不支持 buildx 缓存清单，去掉缓存重试一次"
+  build_image plain || die "docker buildx build 失败"
+fi
 
 # ---------- 8. 从同一 manifest 派生单平台标签 ----------
 # 取某平台「镜像清单」的 digest。必须定位到镜像清单本身：
@@ -346,6 +433,8 @@ cat >"${ANNOTATION_FILE}" <<EOF
   "base_digest": "${BASE_DIGEST}",
   "image_size": "${SIZE_AMD64}",
   "image_size_arm64": "${SIZE_ARM64}",
+  "apk_index_digest": "${APK_INDEX_DIGEST}",
+  "cache": "${CACHE}",
   "built_at": "${BUILT_AT}",
   "source_date": "${BUILD_DATE}",
   "revision": "${VCS_REF}"

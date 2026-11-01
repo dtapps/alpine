@@ -108,22 +108,26 @@ fi
 
 三段参数决定「这次构建能不能拿到新东西」：`--pull`、attestation 开关、缓存。
 
-| 参数                              | 作用                               | 不这么做会怎样                                                           |
-|-----------------------------------|------------------------------------|--------------------------------------------------------------------------|
-| `--pull`                          | 每次都去 registry 取一次基础镜像   | builder 复用缓存的旧基座层，基座标签已挪但它还没跟上                     |
-| `--provenance=false --sbom=false` | 关掉 buildx 默认附加的 attestation | manifest list 里每个架构多出 attestation 条目，digest 与体积都要多绕一层 |
-| CNB：**不用** registry 缓存       | 每轮重新装 184 个包 / 761 MiB      | 缓存命中后 `apk add` 不重跑，上游补丁进不来；还会多出 `buildcache*` 标签 |
-| GitHub：`type=gha` + `CACHE_BUST` | Actions 缓存 + 每天变化的击穿点    | 没有跨轮次缓存，构建变慢；或在缓存命中时永远装到同一批包                 |
+| 参数                              | 作用                                 | 不这么做会怎样                                                           |
+|-----------------------------------|--------------------------------------|--------------------------------------------------------------------------|
+| `--pull`                          | 每次都去 registry 取一次基础镜像     | builder 复用缓存的旧基座层，基座标签已挪但它还没跟上                     |
+| `--provenance=false --sbom=false` | 关掉 buildx 默认附加的 attestation   | manifest list 里每个架构多出 attestation 条目，digest 与体积都要多绕一层 |
+| registry 缓存（两侧都用）         | 读写 `<镜像>:buildcache`，`mode=min` | 每轮重新装 184 个包 / 761 MiB；Chromium 的装包层尤其贵                   |
+| `APK_INDEX_DIGEST`                | 装包层的缓存击穿点                   | 缓存命中后 `apk add` 不重跑，上游补丁进不来                              |
 
 attestation 那两个参数不是无条件加的：buildx 0.10 以下不认 `--provenance`，直接加是硬失败，所以脚本先 `docker buildx build --help | grep -q -- '--provenance'` 探测，不支持就跳过并打一行「当前 buildx 不支持 --provenance」的告警。跳过时构建照常成功，只是体积解析可能取到 index——脚本对「`--raw` 里没有 `layers`」留了兜底路径，见[构建元数据与徽章](metadata-and-badges.md)。
 
-**为什么 CNB 侧不再用 registry 缓存。** 启用跨轮次缓存后，装包层的缓存键由「本层指令 + 上层内容」算出：只要 Dockerfile 与那几个 `--build-arg` 不变，这一层永远命中，`apk add chromium` 一步都不会重跑，上游当天发的 chromium 补丁也就永远进不了镜像。用 `CACHE_BUST` 每天击穿可以解决正确性，但代价是制品库里多出三个 600–800 MiB 的 `buildcache*` 标签，而每日 cron 本来就要重装一次包——缓存省不下多少时间。所以 CNB 侧直接不用缓存：每天真的重装，标签列表也只剩镜像本身。GitHub 侧保留 `type=gha`（存在 Actions 缓存里，不占 GHCR 标签），并用 `CACHE_BUST` 每天击穿。
+**缓存为什么现在可以开。** 跨轮次缓存的风险是装包层的缓存键长期不变，`apk add chromium` 永远不重跑。解法不是「不用缓存」，也不是「按天击穿」，而是把 APK 仓库索引做成指纹：构建前在基座容器里 `apk update`，对 `APKINDEX.*` 求 `sha256`，作为 `--build-arg APK_INDEX_DIGEST` 传进去，并在装包层 `echo` 出来。索引不变 → 整层命中；任何包升级 → 索引变 → 整层重跑。这样每日 cron 仍然在检查上游，但没变化时不再白装 761 MiB。CNB 与 GitHub 结构一致，只是缓存 ref 的地址不同（`docker.cnb.cool/...` / `ghcr.io/...`）。解析失败时脚本自动降级成 `CACHE=off` 全量重建。机制见[缓存实现](../cache-implementation.md)。
 
 完整的一次调用（中性镜像；本地跑要先把 `IMAGE` 换成你有推送权的仓库并 `docker login`）：
 
 ```bash
 IMAGE=docker.cnb.cool/dtapp/alpine/chromium
 BASE=docker.cnb.cool/dtapp/alpine
+
+# 先解析装包层的缓存击穿点（与脚本里的 resolve_apk_index_digest 等价）
+APK_INDEX_DIGEST="$(docker run --rm --platform linux/amd64 "${BASE}:3.24.3@sha256:<digest>" \
+  sh -eu -c 'apk update >/dev/null 2>&1; cat /var/cache/apk/APKINDEX.* | sha256sum | cut -d" " -f1')"
 
 docker buildx build \
   -t "${IMAGE}:3.24.3" \
@@ -133,18 +137,15 @@ docker buildx build \
   --build-arg CHROMIUM_BASE_NAME="${BASE}:3.24.3" \
   --build-arg CHROMIUM_BASE_DIGEST=sha256:<digest> \
   --build-arg ALPINE_VERSION=3.24.3 \
+  --build-arg APK_INDEX_DIGEST="${APK_INDEX_DIGEST}" \
   --build-arg BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
   --build-arg BUILD_REVISION=$(git rev-parse --short HEAD) \
+  --cache-from "type=registry,ref=${IMAGE}:buildcache" \
+  --cache-to "type=registry,ref=${IMAGE}:buildcache,mode=min" \
   -f .cnb/docker/Dockerfile.chromium --push .
 ```
 
-GitHub 侧在同样的命令上追加：
-
-```bash
-  --build-arg CACHE_BUST=$(date -u +%Y%m%d) \
-  --cache-from type=gha,scope=alpine-chromium \
-  --cache-to type=gha,scope=alpine-chromium,mode=min,ignore-error=true
-```
+GitHub 侧把 `IMAGE` / `BASE` 换成 `ghcr.io/<owner>/<repo>/chromium` / `ghcr.io/<owner>/<repo>`，命令其余部分相同。第一次构建时 `<镜像>:buildcache` 还不存在，脚本会跳过 `--cache-from`、只写不读。
 
 ## 改动后的验证方式
 

@@ -39,7 +39,7 @@ docker run --rm --shm-size=1g alpine-chromium:local \
 | `WITH_CHROMEDRIVER`       | `0`                        | `1` 时装 `chromium-chromedriver`（+17.5～28.4 MiB，随分支变化）      |
 | `WITH_SWIFTSHADER`        | `0`                        | `1` 时装 `chromium-swiftshader`（+约 5 MiB），要 WebGL/Canvas 才需要 |
 | `EXPECTED_CHROMIUM_MAJOR` | 空                         | Chromium 主版本断言，不符则构建失败；留空或传 `any` 跳过             |
-| `CACHE_BUST`              | `0`                        | 装包层的缓存击穿点；GitHub 侧每天传新值，CNB 侧不启用缓存            |
+| `APK_INDEX_DIGEST`        | `0`                        | 装包层的缓存击穿点；CI 传 APK 仓库索引的 sha256，索引变则重装        |
 | `BUILD_DATE` / `REVISION` | `unknown`                  | 写进 OCI 标签，由 CI 注入                                            |
 
 ### 基座来源
@@ -105,30 +105,33 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ## buildx 常用参数与缓存
 
-| 参数                              | 作用                 | 本仓库用法                                             |
-|-----------------------------------|----------------------|--------------------------------------------------------|
-| `-f`                              | 指定 Dockerfile      | `.cnb/docker/Dockerfile.chromium`（headless 用另一个） |
-| `--platform`                      | 目标平台             | 一次构建同时给 `linux/amd64,linux/arm64`               |
-| `--build-arg`                     | 传构建参数           | `ALPINE_VERSION` / `CHROMIUM_BASE_*` 等                |
-| `--push`                          | 构建完直接推送       | 每次构建一次                                           |
-| `--pull`                          | 强制刷新基础镜像     | 全部带上，否则可能用 builder 里旧标签对应的基座层      |
-| `--provenance=false --sbom=false` | 关闭默认 attestation | 让 manifest list 只剩每个架构一个条目，digest 好对     |
-| `--cache-from` / `--cache-to`     | 跨流水线层缓存       | CNB 不用；GitHub 用 `type=gha`（不产生 registry 标签） |
+| 参数                              | 作用                 | 本仓库用法                                                   |
+|-----------------------------------|----------------------|--------------------------------------------------------------|
+| `-f`                              | 指定 Dockerfile      | `.cnb/docker/Dockerfile.chromium`（headless 用另一个）       |
+| `--platform`                      | 目标平台             | 一次构建同时给 `linux/amd64,linux/arm64`                     |
+| `--build-arg`                     | 传构建参数           | `ALPINE_VERSION` / `CHROMIUM_BASE_*` / `APK_INDEX_DIGEST` 等 |
+| `--push`                          | 构建完直接推送       | 每次构建一次                                                 |
+| `--pull`                          | 强制刷新基础镜像     | 全部带上，否则可能用 builder 里旧标签对应的基座层            |
+| `--provenance=false --sbom=false` | 关闭默认 attestation | 让 manifest list 只剩每个架构一个条目，digest 好对           |
+| `--cache-from` / `--cache-to`     | 跨流水线层缓存       | 两侧都用 `type=registry,ref=<镜像>:buildcache,mode=min`      |
 
 缓存的两条规律，第二个是本仓库特有的坑：
 
 - **同一个 builder 内的层缓存自动复用**，所以一次多架构构建里的两个平台不会重复干活。
-- **跨轮次缓存必须能被击穿**。启用缓存后，如果 Dockerfile 一个字都没改，装包层会一直命中缓存——上游 chromium 出了补丁也进不来。GitHub 侧因此每天传 `CACHE_BUST=$(date +%Y%m%d)`，它位于装包层的第一条命令里，只让这一层失效。CNB 侧**不启用 registry 缓存**：每日 cron 本来就要重新装包，缓存只会让补丁进不来，还会在制品库里多出 `buildcache*` 标签。
+- **跨轮次缓存必须能被击穿**。启用缓存后，如果 Dockerfile 一个字都没改，装包层会一直命中缓存——上游 chromium 出了补丁也进不来。解法不是按天传日期，而是把 APK 仓库索引做成指纹：构建前在基座容器里 `apk update`，对 `APKINDEX.*` 求 `sha256`，作为 `--build-arg APK_INDEX_DIGEST` 传进去，并在装包层 `echo` 出来。索引不变 → 整层命中；任何包升级 → 索引变 → 整层重跑。
 
 ```bash
-# GitHub 侧的等价参数（gha 缓存，不占 GHCR 标签）
+# 两侧共用的缓存参数（把 IMAGE 换成自己的仓库）
 docker buildx build --platform linux/amd64,linux/arm64 \
-  --cache-to type=gha,scope=alpine-chromium,mode=min,ignore-error=true \
-  --cache-from type=gha,scope=alpine-chromium \
-  --build-arg CACHE_BUST=$(date -u +%Y%m%d) \
-  -f .github/docker/Dockerfile.chromium -t <image>:<alpine 版本> --push .
+  --cache-to "type=registry,ref=${IMAGE}:buildcache,mode=min" \
+  --cache-from "type=registry,ref=${IMAGE}:buildcache" \
+  --build-arg APK_INDEX_DIGEST="${APK_INDEX_DIGEST}" \
+  -f .cnb/docker/Dockerfile.chromium -t "${IMAGE}:<alpine 版本>" --push .
 ```
 
+- 第一次构建时 `<镜像>:buildcache` 还不存在，脚本会先 `imagetools inspect` 探测，不存在就只写不读。
+- 解析索引失败时脚本自动把本次降级成 `CACHE=off`（`--no-cache` 全量重建），不会带着空键读旧缓存。
+- 带缓存的构建失败时（个别 registry 不接受缓存清单），脚本去掉缓存重试一次。
 - 首次构建慢是常态：`chromium` 的依赖闭包在 3.24 上是 184 个包 / 761 MiB installed，下载与解包占掉大部分时间。换 `ALPINE_VERSION` 会连同基座 digest 一起变，从 `FROM` 开始全量失效，等于重新装一遍。
 
 ### 基座变更与缓存
@@ -136,7 +139,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 基座引用是 `FROM` 的一部分，所以「基座换了」和「Dockerfile 改了」一样会命中不了旧缓存：
 
 - **同一轮构建**：脚本先解析基座 digest 再传给 `CHROMIUM_BASE_IMAGE`，一次构建只有一个基座，层缓存正常复用。
-- **跨轮次**：基座 `latest` 每天被 build-alpine 覆盖，digest 一变，`FROM` 这层及其下游自动失效——不需要额外击穿手段，这层「基座更新 → Chromium 重建」是由 digest 自然传导的。`CACHE_BUST` 只解决「基座没变、上游 chromium 包出了补丁」这一种情况。
+- **跨轮次**：基座 `latest` 每天被 build-alpine 覆盖，digest 一变，`FROM` 这层及其下游自动失效——不需要额外击穿手段，这层「基座更新 → Chromium 重建」是由 digest 自然传导的。`APK_INDEX_DIGEST` 只解决「基座没变、上游 chromium 包出了补丁」这一种情况。
 - **不要把基座写成浮动 tag**：CI 里传的是 `@sha256:…` 形式，保证同一次构建里解析到的基座和标签里记录的 `base.digest` 是同一个东西。
 
 ## CI 构建脚本逐段
@@ -153,7 +156,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 5. **解析基座**：按 `version` 映射到本仓库的基座标签（`latest` → `<仓库 slug>:latest`，否则 `<仓库 slug>:<version>`），启动一个容器读 `/etc/alpine-release` 得到实际版本（如 `3.24.3`），再确认 `<仓库 slug>:3.24.3` 存在并取它的 index digest。取不到就 `die`，不会退回官方 `alpine`——这是 Chromium 构建对 build-alpine 产物的硬依赖。之后把 digest 同时传进 `CHROMIUM_BASE_IMAGE`（真正给 `FROM` 用）和 `CHROMIUM_BASE_DIGEST`（给 OCI 标签）。
 
-6. **公共构建参数**：`--pull`、attestation 开关（老版本 buildx 不认 `--provenance` 时自动跳过）、`ALPINE_VERSION`、三个 `CHROMIUM_BASE_*`、`BUILD_DATE`、`BUILD_REVISION`。CNB 侧不传 `CACHE_BUST`（没有 registry 缓存）；GitHub 侧还多传一个按天变化的值，用来击穿 gha 缓存。
+6. **公共构建参数**：`--pull`、attestation 开关（老版本 buildx 不认 `--provenance` 时自动跳过）、`ALPINE_VERSION`、三个 `CHROMIUM_BASE_*`、`APK_INDEX_DIGEST`、`BUILD_DATE`、`BUILD_REVISION`。两侧都读写自己的 `<镜像>:buildcache`；`APK_INDEX_DIGEST` 在基座 digest 解析之后算，索引解析失败会把本次降级成 `CACHE=off`。
 
 7. **一次多架构构建**：只构建一个中性镜像，恒定推 `<alpine 版本>`（脚本从基座解析出来的实际版本，不是入参）。
 
@@ -173,19 +176,19 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ## 构建失败怎么定位
 
-| 现象                                                | 常见原因                                         | 处置                                                                                 |
-|-----------------------------------------------------|--------------------------------------------------|--------------------------------------------------------------------------------------|
-| `❌ version 只接受…`                                | 填了 Chromium 版本号或非法字符                   | 填 `latest`、`3.24`、`3.24.3` 这类 Alpine 版本号                                     |
-| `❌ 找不到基座 <仓库 slug>:<version>`               | 基座仓库里没有同名标签                           | 先跑 build-alpine 产出该标签（`latest` 由每日 `00:05` 任务刷新），或改用已存在的版本 |
-| `FROM` 阶段失败                                     | `CHROMIUM_BASE_IMAGE` 指向的基座拉不到           | 本地核对 `CHROMIUM_BASE_IMAGE`；CI 里检查上一条的基座解析是否通过                    |
-| `❌ chromium 主版本与 EXPECTED_CHROMIUM_MAJOR 不符` | 上游在该分支升了 Chromium 主版本                 | 跑一次渲染冒烟确认无回归，更新 Dockerfile 默认值；临时可传 `any`                     |
-| `docker login` 返回 401                             | `CNB_TOKEN` / `CNB_TOKEN_USER_NAME` 未注入       | 检查 `imports` 是否成功、环境仓库是否可读                                            |
-| buildx 自检失败或 bootstrap 超时                    | 误建了 `docker-container` builder                | 去掉自建 builder，直接用平台内置的                                                   |
-| `apk add` 卡住或超时                                | 某个源当前不可用                                 | 按 [APK 源与网络](mirrors.md) 在宿主机探活源地址                                     |
-| 构建耗时远超预期                                    | 缓存未命中，或换了 `ALPINE_VERSION`              | CNB 本来就没有跨轮次缓存，首轮慢属正常；GitHub 检查 gha 缓存是否命中                 |
-| 单平台标签报 `digest 取不到`                        | manifest list 还没推成功，或 `--provenance` 没关 | 手工 `imagetools inspect` 复核索引条目                                               |
-| 元数据 `chromium_image_digest` 为 `unknown`         | `imagetools inspect` 没取到 digest               | 先确认推送成功，再手工跑一次 `imagetools inspect`                                    |
-| 本地 `-headless` 构建失败                           | `BASE_IMAGE` 拉不到（基础镜像还没构建/拉取）     | 先构建中性镜像，或把 `BASE_IMAGE` 指向已发布的 chromium 标签                         |
+| 现象                                                | 常见原因                                         | 处置                                                                                      |
+|-----------------------------------------------------|--------------------------------------------------|-------------------------------------------------------------------------------------------|
+| `❌ version 只接受…`                                | 填了 Chromium 版本号或非法字符                   | 填 `latest`、`3.24`、`3.24.3` 这类 Alpine 版本号                                          |
+| `❌ 找不到基座 <仓库 slug>:<version>`               | 基座仓库里没有同名标签                           | 先跑 build-alpine 产出该标签（`latest` 由每日 `00:05` 任务刷新），或改用已存在的版本      |
+| `FROM` 阶段失败                                     | `CHROMIUM_BASE_IMAGE` 指向的基座拉不到           | 本地核对 `CHROMIUM_BASE_IMAGE`；CI 里检查上一条的基座解析是否通过                         |
+| `❌ chromium 主版本与 EXPECTED_CHROMIUM_MAJOR 不符` | 上游在该分支升了 Chromium 主版本                 | 跑一次渲染冒烟确认无回归，更新 Dockerfile 默认值；临时可传 `any`                          |
+| `docker login` 返回 401                             | `CNB_TOKEN` / `CNB_TOKEN_USER_NAME` 未注入       | 检查 `imports` 是否成功、环境仓库是否可读                                                 |
+| buildx 自检失败或 bootstrap 超时                    | 误建了 `docker-container` builder                | 去掉自建 builder，直接用平台内置的                                                        |
+| `apk add` 卡住或超时                                | 某个源当前不可用                                 | 按 [APK 源与网络](mirrors.md) 在宿主机探活源地址                                          |
+| 构建耗时远超预期                                    | 缓存未命中，或换了 `ALPINE_VERSION`              | 首次或换基座后慢属正常；查 annotation 里的 `chromium_cache` / `chromium_apk_index_digest` |
+| 单平台标签报 `digest 取不到`                        | manifest list 还没推成功，或 `--provenance` 没关 | 手工 `imagetools inspect` 复核索引条目                                                    |
+| 元数据 `chromium_image_digest` 为 `unknown`         | `imagetools inspect` 没取到 digest               | 先确认推送成功，再手工跑一次 `imagetools inspect`                                         |
+| 本地 `-headless` 构建失败                           | `BASE_IMAGE` 拉不到（基础镜像还没构建/拉取）     | 先构建中性镜像，或把 `BASE_IMAGE` 指向已发布的 chromium 标签                              |
 
 定位手法：
 

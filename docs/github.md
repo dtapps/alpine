@@ -14,7 +14,7 @@ GitHub 侧不 `source` CNB 的脚本，也不与 CNB 共用 Dockerfile。两个�
 | 流水线     | `.cnb.yml` + `.cnb/workflows/`                           | `.github/workflows/`                                        |
 | 元数据     | `.cnb/annotation.json` → commit annotation → 徽章        | `.github/annotation.json` → Step Summary + artifact         |
 
-复制而不是共用的原因：两侧的标签规则、冒烟断言是同构的，但**平台胶水完全不同**——CNB 读 `CNB_*` 变量、用 `##[set-output]`、写 commit annotation、注释里还有「imports 改写」这类历史约束；GitHub 读 Actions 上下文、写 Step Summary/artifact、缓存后端是 `type=gha`。共用意味着任何一侧改平台细节都要考虑另一侧，也会把 CNB 的历史包袱带进 GitHub（反过来同样）。
+复制而不是共用的原因：两侧的标签规则、冒烟断言是同构的，但**平台胶水不同**——CNB 读 `CNB_*` 变量、用 `##[set-output]`、写 commit annotation、注释里还有「imports 改写」这类历史约束；GitHub 读 Actions 上下文、写 Step Summary/artifact、凭证与触发方式也不同。共用意味着任何一侧改平台细节都要考虑另一侧，也会把 CNB 的历史包袱带进 GitHub（反过来同样）。
 
 代价只有一条，且是硬性规则：**改镜像内容、标签规则、冒烟断言时，两份都要改**（见 [CONTRIBUTING](../CONTRIBUTING.md) 硬性规则）。改平台胶水（触发器、缓存、元数据落地）则只改自己那一份。
 
@@ -89,19 +89,19 @@ Dockerfile 里的 `ARG IMAGE_SOURCE=…`、`ARG CHROMIUM_BASE_IMAGE=alpine:${ALP
 
 ## 与 CNB 的实现差异
 
-| 维度     | CNB                                               | GitHub Actions                                                            |
-|----------|---------------------------------------------------|---------------------------------------------------------------------------|
-| 地址来源 | `CNB_DOCKER_REGISTRY` + `CNB_REPO_SLUG_LOWERCASE` | `ghcr.io` + `GITHUB_REPOSITORY`（小写）                                   |
-| builder  | `services: docker` 自带多架构 buildx              | `docker/setup-qemu-action` + `docker/setup-buildx-action` 现装            |
-| arm64    | runner 内置 binfmt                                | QEMU 模拟；chromium 多架构因此要几十分钟（超时给到 120 分钟）             |
-| 层缓存   | 两个镜像都不用 registry 缓存                      | Alpine 不用缓存；Chromium 用 GitHub Actions 缓存（`type=gha`，不占 GHCR） |
-| 元数据   | `.cnb/annotation.json` → commit annotation → 徽章 | `.github/annotation.json` → Step Summary + `upload-artifact`（留 30 天）  |
-| 磁盘     | 专用 runner                                       | hosted runner 约 14 GiB，chromium 构建前先删预装 SDK 腾空间               |
-| 权限     | 组织密钥仓库 `imports`                            | `permissions: packages: write` + `GITHUB_TOKEN`                           |
+| 维度     | CNB                                               | GitHub Actions                                                           |
+|----------|---------------------------------------------------|--------------------------------------------------------------------------|
+| 地址来源 | `CNB_DOCKER_REGISTRY` + `CNB_REPO_SLUG_LOWERCASE` | `ghcr.io` + `GITHUB_REPOSITORY`（小写）                                  |
+| builder  | `services: docker` 自带多架构 buildx              | `docker/setup-qemu-action` + `docker/setup-buildx-action` 现装           |
+| arm64    | runner 内置 binfmt                                | QEMU 模拟；chromium 多架构因此要几十分钟（超时给到 120 分钟）            |
+| 层缓存   | 两个镜像都用 registry 缓存                        | 同左：`<镜像>:buildcache`，按 APK 索引指纹失效                           |
+| 元数据   | `.cnb/annotation.json` → commit annotation → 徽章 | `.github/annotation.json` → Step Summary + `upload-artifact`（留 30 天） |
+| 磁盘     | 专用 runner                                       | hosted runner 约 14 GiB，chromium 构建前先删预装 SDK 腾空间              |
+| 权限     | 组织密钥仓库 `imports`                            | `permissions: packages: write` + `GITHUB_TOKEN`                          |
 
-关于 `type=gha` 缓存：它存在 Actions 缓存里，不往 GHCR 推 `buildcache*` 标签。Chromium 只有一个中性镜像，用单一 `scope`（`alpine-chromium`）；`CACHE_BUST` 每天变化，保证上游 chromium 补丁进得来。
+关于 registry 缓存：两个镜像都往自己的 `<镜像>:buildcache` 写缓存（`mode=min`），与 CNB 侧同构。装包层的缓存键里带 `APK_INDEX_DIGEST`，索引不变就命中、任何包升级就重跑 `apk add`。GHCR 上会因此多一个 `buildcache` 标签，它是缓存清单，不是可拉取的镜像。
 
-关于 Alpine 为什么不用缓存：它只有一个 `RUN`，命中缓存就等于不装包，每日重建的「刷新依赖」意义会消失（详见 [CNB 流水线](alpine/ci-pipeline.md) 的同名小节）。GitHub 侧沿用这个结论。
+关于 Alpine 为什么现在可以用缓存：单层 `RUN` 的缓存键已经带上 APK 索引指纹，命中只发生在「仓库里一个包都没变」时；一旦有包升级，索引变化会让装包层重跑，每日重建的「刷新依赖」语义不受影响。机制见[缓存实现](cache-implementation.md)。
 
 ## 权限与可见性
 
@@ -136,7 +136,7 @@ gh run download <run-id> -n alpine-annotation
 | `找不到基座 ghcr.io/…`         | Chromium 构建早于基座、`version` 指向未构建的标签，或此时基座 manifest 还没推完 | 先跑 `build-alpine.yml`，确认 GHCR 上有该标签，再重试 |
 | chromium 构建在断言处失败      | 填了 `expected_chromium_major`，但上游升了 Chromium 主版本                      | 用新的主版本号覆盖，或传 `any` 跳过断言               |
 | `toomanyrequests`              | Docker Hub 对匿名拉取限流（runner 是共享出口 IP）                               | 构建日志；换镜像源或配置 Docker Hub 凭证              |
-| GHCR 上找不到 `buildcache*`    | 预期行为：GitHub 用 Actions 缓存，不推 registry 缓存                            | 无需处理                                              |
+| GHCR 上出现 `buildcache`       | 预期行为：registry 缓存清单，不是镜像标签                                       | 无需处理；不想用可传 `CACHE=off`                      |
 
 ## 维护约定
 

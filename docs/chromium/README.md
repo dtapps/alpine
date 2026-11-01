@@ -58,7 +58,7 @@ chromium:3.24.3-linux-arm64
 
 标签里的版本**不是入参**：脚本从基座容器里读 `/etc/alpine-release`，把 `dtapp/alpine:latest` 解析成 `3.24.3` 这种确定值。`version` 入参只决定选哪个基座标签（`latest` / `3.24` / `3.24.3`）。`latest` 与 minor 只在 `dtapp/alpine` 的同名标签已指向同一 digest 时提升，所以 Chromium 永远不会跑到基座前面。
 
-`-cjk` / `-headless` 不再发布；需要中文字体或内置无头参数时，用 `WITH_CJK=1` / `Dockerfile.headless` 自行派生。CNB 侧也不再推 `buildcache*`：registry 缓存已移除，每日重建必须真的重跑 `apk add`，否则上游补丁进不来；GitHub 侧一直用 Actions 缓存，本来就不占 GHCR 标签。旧标签的替代方案见 [镜像与标签](images-and-tags.md#旧标签怎么迁移)。
+`-cjk` / `-headless` 不再发布；需要中文字体或内置无头参数时，用 `WITH_CJK=1` / `Dockerfile.headless` 自行派生。两个平台现在都用 registry 缓存（`<镜像>:buildcache`）：装包层的缓存键里带 APK 索引指纹，索引不变才命中，任何包升级都会重跑 `apk add`，上游补丁照样进得来。旧标签的替代方案见 [镜像与标签](images-and-tags.md#旧标签怎么迁移)。
 
 单平台标签由 `docker buildx imagetools create` 从同一份 manifest list 里取 digest 打出来，不是重新构建，digest 与多架构标签里的对应条目完全一致。详见 [镜像与标签](images-and-tags.md)。
 
@@ -157,7 +157,7 @@ USER chrome
 
 `expected_chromium_major` 的处理规则：空 = 不传 `--build-arg`，用 Dockerfile 默认值（空，即不校验）；纯数字（如 `156`）= 覆盖断言；`any` = 跳过断言；其它值直接 `exit 1`。
 
-GitHub 侧定时构建每天会传一个新的 `CACHE_BUST`（按天变化），用它击穿 Actions 缓存，这样上游补丁不用等 Dockerfile 改动也能进镜像；CNB 侧不启用 registry 缓存，每轮构建本来就会重新装包。
+两个平台都用 registry 缓存，但失效点是 APK 索引指纹而不是日期：构建前在基座容器里 `apk update` 并对 `APKINDEX` 求 `sha256`，索引不变就命中，任何包升级就重跑装包层。所以上游补丁不用等 Dockerfile 改动也能进镜像，没变化时又不会白装 761 MiB。机制见[缓存实现](../cache-implementation.md)。
 
 ## 构建产物元数据
 

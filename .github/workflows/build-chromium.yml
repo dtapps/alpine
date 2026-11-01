@@ -18,7 +18,7 @@
 # 与 CNB 版的差异（复制之后各自演进）：
 #   1. 定时任务 01:35 Asia/Shanghai = 17:35 UTC（GitHub cron 只认 UTC）；
 #   2. 构建器与 QEMU 由 workflow 现装；chromium 的闭包很大，先释放磁盘；
-#   3. 层缓存用 GitHub Actions 缓存（type=gha），不往 GHCR 推 buildcache* 标签；
+#   3. 层缓存用 registry 缓存（type=registry，<镜像>:buildcache），与 CNB 侧同构；
 #   4. arm64 走 QEMU 模拟，多架构一次要几十分钟，超时给到 120 分钟；
 #   5. 元数据写 .github/annotation.json，供 Step Summary / artifact 使用。
 #
