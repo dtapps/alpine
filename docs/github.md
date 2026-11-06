@@ -55,7 +55,13 @@ GitHub 侧 Chromium 的基座就是这里产出的 `ghcr.io/<owner>/<repo>`：`b
 | `schedule`          | 每天 `16:35 UTC`（= 00:35 Asia/Shanghai） | 每天 `17:35 UTC`（= 01:35 Asia/Shanghai） | 跟随上游重建；Chromium 排在基座之后 1 小时（16:35 → 17:35 UTC）。跨平台互不等待，比 CNB 的 00:05 / 01:05 各晚 30 分钟 |
 | `workflow_dispatch` | 输入 `version`                            | 输入 `version`、`expected_chromium_major` | 手动构建，输入语义与 CNB 按钮完全一致；Chromium 的 `version` 选的是 GHCR 上已有的基座标签                             |
 
-两个 workflow 都用 `concurrency: build-*-${{ github.ref }}` 串行化：定时与手动同时触发时排队，避免两条流水线并发改同一个 `latest` / `<minor>`。`cancel-in-progress: false`，不要改成 `true`——把正在推 manifest 的那次构建砍掉，会留下半套标签。
+两个 workflow 用同一个 `concurrency.group`（`image-build-${{ github.ref }}`）：同一 ref 下 alpine 与 chromium、定时与手动全部进一条队列串行执行，避免并发改同一批 `latest` / `<minor>` 标签。group 带 `github.ref`，不同分支/标签各自成队、互不等待——从非默认分支手动触发时不会排在默认分支的定时任务后面。
+
+但镜像名来自 `GITHUB_REPOSITORY`、不含 ref：不同分支产出的仍是同一批标签，跨 ref 并发有覆盖风险，试推请显式传 `IMAGE` 指到自己的路径。
+
+关键的是 `queue: max`。concurrency 默认是 `queue: single`——同组**只保留 1 个 pending**，新触发会把更早排队的 run 取消掉（Actions 页面上看就是「旧的被取消」），这与 `cancel-in-progress` 的值无关。`max` 允许最多 100 个 run 按 FIFO 依次等待，只有队列满时溢出的新 run 才会被取消。
+
+`cancel-in-progress: false` 必须保留，不要改成 `true`——把正在推 manifest 的那次构建砍掉，会留下半套标签；而且 `queue: max` 与 `cancel-in-progress: true` 组合会直接触发 workflow 校验错误。
 
 ### 定时任务只认 UTC
 
@@ -97,7 +103,7 @@ Dockerfile 里的 `ARG IMAGE_SOURCE=…`、`ARG CHROMIUM_BASE_IMAGE=alpine:${ALP
 | 层缓存   | 两个镜像都用 registry 缓存                        | 同左：`<镜像>:buildcache`，按 APK 索引指纹失效                           |
 | 元数据   | `.cnb/annotation.json` → commit annotation → 徽章 | `.github/annotation.json` → Step Summary + `upload-artifact`（留 30 天） |
 | 磁盘     | 专用 runner                                       | hosted runner 约 14 GiB，chromium 构建前先删预装 SDK 腾空间              |
-| 权限     | 组织密钥仓库 `imports`                            | `permissions: packages: write` + `GITHUB_TOKEN`                          |
+| 权限     | 组织密钥仓库 `imports`                            | `permissions: contents: read` + `packages: write` + `GITHUB_TOKEN`       |
 
 关于 registry 缓存：两个镜像都往自己的 `<镜像>:buildcache` 写缓存（`mode=min`），与 CNB 侧同构。装包层的缓存键里带 `APK_INDEX_DIGEST`，索引不变就命中、任何包升级就重跑 `apk add`。GHCR 上会因此多一个 `buildcache` 标签，它是缓存清单，不是可拉取的镜像。
 
@@ -105,7 +111,7 @@ Dockerfile 里的 `ARG IMAGE_SOURCE=…`、`ARG CHROMIUM_BASE_IMAGE=alpine:${ALP
 
 ## 权限与可见性
 
-- workflow 里显式声明 `permissions: contents: read` + `packages: write`。仓库默认的 `GITHUB_TOKEN` 权限若是只读，推送会报 `denied: permission_denied`，这是第一个要检查的地方。
+- 两个 workflow 顶层声明 `permissions: contents: read` + `packages: write`：前者给 `actions/checkout`，后者给脚本 `docker login` 后对 GHCR 的读写（推 manifest / `buildcache` / 提升标签；`imagetools inspect`、冒烟 `docker pull`，chromium 还要读 `build-alpine` 产出的基座）。显式声明后未列出的 scope 一律 `none`，且 `write` 隐含 `read`——**降成 `packages: read` 会让 `--push` 报 `denied: permission_denied`**。
 - 包第一次被推送后，可见性由包自己的设置决定，**不会**自动跟随仓库可见性。需要匿名可拉时，去包页面（`https://github.com/users/<owner>/packages/container/alpine`；chromium 的包名是 `alpine/chromium`，URL 里写作 `alpine%2Fchromium`）把 visibility 改成 public。
 - `source` 标签指回仓库后，包会挂在仓库的 Packages 区，仓库权限也才能顺延到包上。
 - 构建 workflow 只有 `schedule` 与 `workflow_dispatch` 两个触发；`push` / `pull_request` 不会自动构建，也没有 PR 校验作业，改完 Dockerfile 需手动触发或本地构建验证。

@@ -40,15 +40,24 @@ on:
         default: ''
         type: string
 
-# GITHUB_TOKEN 默认只读，推送 GHCR 必须显式要 packages: write
+# 显式声明 permissions 后，未列出的 scope 一律为 none，两项都不能省。
+#   contents: read  — actions/checkout 检出源码
+#   packages: write — 脚本用 GITHUB_TOKEN 登录后推镜像、推 buildcache、提升标签；
+#                     write 隐含 read，inspect 与冒烟 pull 的读也由它覆盖。
+#                     改成 read 会让 --push 报 denied: permission_denied。
 permissions:
   contents: read
   packages: write
 
+# 并发策略：同一分支的多次触发串行排队，绝不取消「正在运行」的旧运行。
+# cancel-in-progress: false 表示新运行进入 pending 等待，而非抢占/取消 in-progress。
+# queue: max 让同一 group 最多保留 100 个 pending（默认 queue: single 只留 1 个，
+# 新的会顶掉旧的 pending），按进入等待的先后 FIFO 依次执行，仅队列满的溢出运行被取消。
+# 注意：queue: max 不能与 cancel-in-progress: true 组合，否则 workflow 校验失败。
 concurrency:
-  # 定时与手动同时触发时排队而不是并发：两条流水线同时改 latest/3.25 会互相覆盖
-  group: build-alpine-${{ github.ref }}
+  group: image-build-${{ github.ref }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   build:
