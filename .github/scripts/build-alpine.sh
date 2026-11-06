@@ -75,13 +75,11 @@ esac
 #   任何包升级 → 索引变化 → 装包层重跑，拿到新包。
 # 这比「按天击穿」精确：没变化时不会白装一遍，有变化时也不会漏。
 # 解析失败输出空串，调用方据此关闭缓存（宁可全量重建，也不读可能过期的缓存）。
-resolve_apk_index_digest() ( # $1=基础镜像引用 $2=是否换成腾讯云源(1/0)
+# GitHub runner 在境外，直连 Alpine 官方源最快，不设任何镜像加速；
+# 指纹必须与实际构建用的同一套源，不要从 CNB 侧复制换源分支。
+resolve_apk_index_digest() ( # $1=基础镜像引用
   ref=$1
-  mirror=${2:-0}
-  docker run --rm --platform linux/amd64 -e "MIRROR=${mirror}" "${ref}" sh -eu -c '
-    if [ "${MIRROR}" = "1" ]; then
-      sed -i "s@dl-cdn.alpinelinux.org@mirrors.cloud.tencent.com@g" /etc/apk/repositories
-    fi
+  docker run --rm --platform linux/amd64 "${ref}" sh -eu -c '
     apk update >/dev/null 2>&1
     printf "APK_INDEX_DIGEST=%s\n" \
       "$(cat /var/cache/apk/APKINDEX.* 2>/dev/null | sha256sum | cut -d" " -f1)"
@@ -189,7 +187,7 @@ MINOR="$(printf '%s' "${ALPINE_REAL}" | cut -d. -f1,2)"
 APK_INDEX_DIGEST="disabled"
 if [ "${CACHE}" = "on" ]; then
   info "解析 APK 仓库索引指纹（缓存击穿点）"
-  APK_INDEX_DIGEST="$(resolve_apk_index_digest "alpine:${ALPINE_REF}" 0)"
+  APK_INDEX_DIGEST="$(resolve_apk_index_digest "alpine:${ALPINE_REF}")"
   if [ -z "${APK_INDEX_DIGEST}" ]; then
     warn "APK 索引解析失败，本次关闭缓存（全量重建）"
     CACHE="off"
@@ -315,13 +313,35 @@ manifest_digest_for() (
   printf '%s\n' "${digest}"
 )
 
+# ---------- imagetools create 重试包装 ----------
+# 刚写完 registry 缓存清单就回读 blob 时，制品库偶尔返回截断响应
+# （copy ...: unexpected EOF），GHCR 也一样可能遇到。重推同一份 manifest 是
+# 幂等的：重试 3 次、间隔 5s/10s，全失败才交给调用方 die。与 .cnb/scripts 同构。
+create_tag_with_retry() (
+  tag=$1
+  src=$2
+  retry_n=1
+  while [ "${retry_n}" -le 3 ]; do
+    if docker buildx imagetools create -t "${tag}" "${src}"; then
+      return 0
+    fi
+    if [ "${retry_n}" -eq 3 ]; then
+      return 1
+    fi
+    warn "imagetools create ${tag} 第 ${retry_n} 次失败，$((retry_n * 5)) 秒后重试"
+    sleep $((retry_n * 5))
+    retry_n=$((retry_n + 1))
+  done
+  return 1
+)
+
 # 不重新构建：digest 与 index 里的条目完全一致，省掉两次构建
 # （其中 arm64 那次要在 amd64 runner 上用 QEMU 重跑一遍 apk add，最贵）
 for arch in amd64 arm64; do
   digest="$(manifest_digest_for "${arch}")"
   [ -n "${digest}" ] || die "未在 ${IMAGE}:${STAMP} 中找到 linux/${arch} 条目"
-  docker buildx imagetools create -t "${IMAGE}:${STAMP}-linux-${arch}" "${IMAGE}@${digest}" \
-    || die "派生 ${STAMP}-linux-${arch} 失败"
+  create_tag_with_retry "${IMAGE}:${STAMP}-linux-${arch}" "${IMAGE}@${digest}" \
+    || die "派生 ${STAMP}-linux-${arch} 失败（已重试 3 次）"
   info "派生 ${STAMP}-linux-${arch} ← ${digest}"
 done
 
@@ -363,8 +383,8 @@ label_version="$(docker image inspect \
 # ---------- 10. 提升可变标签（冒烟之后才动） ----------
 # 顺序固定 minor 在前、latest 最后：minor 失败时 latest 一定还指向旧产物。
 for tag in "${MINOR}" latest; do
-  docker buildx imagetools create -t "${IMAGE}:${tag}" "${IMAGE}:${STAMP}" \
-    || die "提升 ${tag} 失败"
+  create_tag_with_retry "${IMAGE}:${tag}" "${IMAGE}:${STAMP}" \
+    || die "提升 ${tag} 失败（已重试 3 次）"
   info "提升 ${IMAGE}:${tag} → ${STAMP}"
 done
 

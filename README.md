@@ -69,6 +69,15 @@ docs/
 └── github.md                       # GitHub Actions / GHCR 平台说明（两份副本的同步规则）
 ```
 
+## 镜像源
+
+| 平台           | Alpine apk 源                                   |
+|----------------|-------------------------------------------------|
+| GitHub Actions | 直连官方 `dl-cdn.alpinelinux.org`，不设镜像加速 |
+| CNB            | 腾讯云 `https://mirrors.cloud.tencent.com`      |
+
+GitHub runner 在境外，直连官方源最快，这一侧的 Dockerfile 与构建脚本都不设镜像加速；CNB 侧把 `dl-cdn.alpinelinux.org` 换成腾讯云（`main` + `community` 同源），APK 索引指纹也按实际使用的源计算，保证缓存键与装包层一致。本仓库不涉及 Go / APT / npm / pnpm / 下载源。细节见 [docs/alpine/mirrors.md](docs/alpine/mirrors.md) 与 [docs/chromium/mirrors.md](docs/chromium/mirrors.md)。
+
 ## 约定
 
 - 提交前跑 `make format`（yamlfmt / markdownfmt / shfmt / dockerfmt）与 `make lint-shell`；范围包含 `.cnb/` 与 `.github/` 两侧的脚本、Dockerfile 与 workflow。

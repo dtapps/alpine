@@ -328,6 +328,74 @@ elif ! build_image on; then
   build_image plain || die "docker buildx build 失败"
 fi
 
+# ---------- 直接挂 manifest（绕开 imagetools create 的 blob 复制） ----------
+# CNB 制品库不提供 imagetools create 需要的「把镜像清单当 blob 读」：
+# copy sha256:<digest> from <repo>@<digest> ... unexpected EOF 在 0.000s 稳定复现，
+# 重试无效。实测 /v2/<repo>/manifests/<digest> 可读（200 + Docker-Content-Digest），
+# 所以源与目标同仓库时，只要把这份清单原文 PUT 到新 tag：层 blob 本来就在制品库里，
+# 不触发任何 blob 复制，digest 逐字节不变。
+REG_HOST="${IMAGE%%/*}"
+REPO_PATH="${IMAGE#*/}"
+OCI_ACCEPT="application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json"
+
+# /v2/ 的 Www-Authenticate 给出 Bearer realm/service，用 docker login 的同一组凭证换 token。
+registry_auth() (
+  basic="$(printf '%s:%s' "${CNB_TOKEN_USER_NAME}" "${CNB_TOKEN}" | base64 | tr -d '\n')"
+  challenge="$(curl -sS -D - -o /dev/null "https://${REG_HOST}/v2/" 2>/dev/null \
+    | tr -d '\r' | grep -i '^www-authenticate:' | tail -n 1 || true)"
+  realm="$(printf '%s' "${challenge}" | sed -n 's/.*realm="\([^"]*\)".*/\1/p')"
+  service="$(printf '%s' "${challenge}" | sed -n 's/.*service="\([^"]*\)".*/\1/p')"
+  if [ -z "${realm}" ]; then
+    printf 'Authorization: Basic %s\n' "${basic}"
+    return 0
+  fi
+  token="$(curl -sS -H "Authorization: Basic ${basic}" \
+    "${realm}?service=${service}&scope=repository:${REPO_PATH}:pull,push" \
+    | sed -n 's/.*"token":"\([^"]*\)".*/\1/p' | tr -d '\n' || true)"
+  [ -n "${token}" ] || return 1
+  printf 'Authorization: Bearer %s\n' "${token}"
+)
+
+# $1=目标 tag，$2=源清单引用（tag 或 sha256:digest）；成功时打印写入的 digest。
+put_manifest() (
+  tag=$1
+  src=$2
+  body="$(mktemp)"
+  hdr="$(mktemp)"
+  put_hdr="$(mktemp)"
+  auth="$(registry_auth)" || {
+    rm -f "${body}" "${hdr}" "${put_hdr}"
+    return 1
+  }
+  if ! curl -fsS -D "${hdr}" -o "${body}" -H "${auth}" -H "Accept: ${OCI_ACCEPT}" \
+    "https://${REG_HOST}/v2/${REPO_PATH}/manifests/${src}"; then
+    warn "读取源清单 ${src} 失败"
+    rm -f "${body}" "${hdr}" "${put_hdr}"
+    return 1
+  fi
+  media="$(tr -d '\r' <"${hdr}" \
+    | sed -n 's/^[Cc]ontent-[Tt]ype:[[:space:]]*\([^;[:space:]]*\).*/\1/p' | tail -n 1)"
+  want="$(tr -d '\r' <"${hdr}" \
+    | sed -n 's/^[Dd]ocker-[Cc]ontent-[Dd]igest:[[:space:]]*\([^[:space:]]*\).*/\1/p' | tail -n 1)"
+  [ -n "${media}" ] || media="application/vnd.oci.image.manifest.v1+json"
+  if ! curl -fsS -X PUT -D "${put_hdr}" -o /dev/null \
+    -H "${auth}" -H "Content-Type: ${media}" --data-binary "@${body}" \
+    "https://${REG_HOST}/v2/${REPO_PATH}/manifests/${tag}"; then
+    warn "PUT ${tag} 失败（源 ${src}，Content-Type ${media}）"
+    rm -f "${body}" "${hdr}" "${put_hdr}"
+    return 1
+  fi
+  got="$(tr -d '\r' <"${put_hdr}" \
+    | sed -n 's/^[Dd]ocker-[Cc]ontent-[Dd]igest:[[:space:]]*\([^[:space:]]*\).*/\1/p' | tail -n 1)"
+  if [ -n "${want}" ] && [ -n "${got}" ] && [ "${want}" != "${got}" ]; then
+    warn "PUT ${tag} 后 digest 不一致：${want} → ${got}"
+    rm -f "${body}" "${hdr}" "${put_hdr}"
+    return 1
+  fi
+  printf '%s\n' "${want:-unknown}"
+  rm -f "${body}" "${hdr}" "${put_hdr}"
+)
+
 # ---------- 8. 从同一 manifest 派生单平台标签 ----------
 # 不重新构建：digest 与 index 里的条目完全一致，省掉两次构建
 # （其中 arm64 那次要在 amd64 runner 上用 QEMU 重跑一遍 apk add，最贵）
@@ -335,8 +403,8 @@ fi
 for arch in amd64 arm64; do
   digest="$(manifest_digest_for "${arch}")"
   [ -n "${digest}" ] || die "未在 ${IMAGE}:${STAMP} 中找到 linux/${arch} 条目"
-  docker buildx imagetools create -t "${IMAGE}:${STAMP}-linux-${arch}" "${IMAGE}@${digest}" \
-    || die "派生 ${STAMP}-linux-${arch} 失败"
+  put_manifest "${STAMP}-linux-${arch}" "${digest}" \
+    || die "派生 ${STAMP}-linux-${arch} 失败（Registry API PUT）"
   info "派生 ${STAMP}-linux-${arch} ← ${digest}"
 done
 
@@ -381,8 +449,8 @@ label_version="$(docker image inspect \
 # 注意：冒烟失败时 ${STAMP} 指向的是这份坏产物（没有临时标签可以退回），
 # 但 latest / MINOR 不会动，下游按这两个标签拉取不受影响。
 for tag in "${MINOR}" latest; do
-  docker buildx imagetools create -t "${IMAGE}:${tag}" "${IMAGE}:${STAMP}" \
-    || die "提升 ${tag} 失败"
+  put_manifest "${tag}" "${STAMP}" \
+    || die "提升 ${tag} 失败（Registry API PUT）"
   info "提升 ${IMAGE}:${tag} → ${STAMP}"
 done
 

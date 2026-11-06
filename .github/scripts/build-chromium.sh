@@ -378,13 +378,34 @@ elif ! build_image on; then
   build_image plain || die "docker buildx build 失败"
 fi
 
+# ---------- imagetools create 重试包装 ----------
+# 刚写完 registry 缓存清单就回读 blob 时，制品库偶尔返回截断响应
+# （copy ...: unexpected EOF），GHCR 也一样可能遇到。重推同一份 manifest 是
+# 幂等的：重试 3 次、间隔 5s/10s，全失败才交给调用方 die。与 .cnb/scripts 同构。
+create_tag_with_retry() (
+  tag=$1
+  src=$2
+  retry_n=1
+  while [ "${retry_n}" -le 3 ]; do
+    if docker buildx imagetools create -t "${tag}" "${src}"; then
+      return 0
+    fi
+    if [ "${retry_n}" -eq 3 ]; then
+      return 1
+    fi
+    warn "imagetools create ${tag} 第 ${retry_n} 次失败，$((retry_n * 5)) 秒后重试"
+    sleep $((retry_n * 5))
+    retry_n=$((retry_n + 1))
+  done
+  return 1
+)
+
 # ---------- 6. 从同一 manifest 派生单平台标签 ----------
 for arch in amd64 arm64; do
   digest="$(manifest_digest_for "${IMAGE}:${STAMP}" "${arch}")"
   [ -n "${digest}" ] || die "未在 ${IMAGE}:${STAMP} 中找到 linux/${arch} 条目"
-  docker buildx imagetools create -t "${IMAGE}:${STAMP}-linux-${arch}" \
-    "${IMAGE}@${digest}" \
-    || die "派生 ${STAMP}-linux-${arch} 失败"
+  create_tag_with_retry "${IMAGE}:${STAMP}-linux-${arch}" "${IMAGE}@${digest}" \
+    || die "派生 ${STAMP}-linux-${arch} 失败（已重试 3 次）"
   info "派生 ${IMAGE}:${STAMP}-linux-${arch} ← ${digest}"
 done
 
@@ -422,14 +443,29 @@ info "chromium ${CHROMIUM_VERSION}，渲染、时区与基座标签校验通过"
 # 才把 chromium 的同名标签提升过去。手动构建旧分支（如 3.24）时，latest 仍在
 # 3.25 上，这里会自动跳过，不会把 chromium:latest 拉回旧版本。
 for tag in "${MINOR}" latest; do
-  base_tag_digest="$(docker buildx imagetools inspect "${BASE_REPO}:${tag}" \
-    --format '{{.Manifest.Digest}}' 2>/dev/null || true)"
+  # inspect 读失败（制品库瞬时断流）不能当成「基座未对齐」静默跳过：
+  # 重试 3 次仍读不到时打明确告警，并保持原有跳过语义（标签可能本来就不存在）。
+  base_tag_digest=""
+  inspect_n=1
+  while [ "${inspect_n}" -le 3 ]; do
+    if base_tag_digest="$(docker buildx imagetools inspect "${BASE_REPO}:${tag}" \
+      --format '{{.Manifest.Digest}}' 2>/dev/null)"; then
+      break
+    fi
+    if [ "${inspect_n}" -eq 3 ]; then
+      warn "读取 ${BASE_REPO}:${tag} 失败（已重试 3 次）：无法确认基座是否对齐，跳过 ${IMAGE}:${tag} 提升"
+      break
+    fi
+    warn "读取 ${BASE_REPO}:${tag} 第 ${inspect_n} 次失败，$((inspect_n * 5)) 秒后重试"
+    sleep $((inspect_n * 5))
+    inspect_n=$((inspect_n + 1))
+  done
   if [ "${base_tag_digest}" != "${BASE_DIGEST}" ]; then
     info "跳过 ${IMAGE}:${tag}：${BASE_REPO}:${tag} 尚未指向 ${STAMP}"
     continue
   fi
-  docker buildx imagetools create -t "${IMAGE}:${tag}" "${IMAGE}:${STAMP}" \
-    || die "提升 ${tag} 失败"
+  create_tag_with_retry "${IMAGE}:${tag}" "${IMAGE}:${STAMP}" \
+    || die "提升 ${tag} 失败（已重试 3 次）"
   info "提升 ${IMAGE}:${tag} → ${STAMP}"
 done
 

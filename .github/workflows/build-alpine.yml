@@ -23,6 +23,11 @@
 # 下游：build-chromium workflow 的基座就是这里产出的 latest / <version>，
 # 所以 16:35 UTC 必须早于 Chromium 的 17:35 UTC（间隔 1 小时）。
 # ===================================================================
+# https://github.com/actions/runner-images
+# https://github.com/actions/checkout
+# https://github.com/docker/setup-qemu-action
+# https://github.com/docker/setup-buildx-action
+# https://github.com/actions/upload-artifact
 name: build-alpine
 
 on:
@@ -61,7 +66,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 90
     steps:
       - name: 检出源码
