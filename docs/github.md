@@ -1,10 +1,10 @@
 # GitHub Actions 与 GHCR
 
-> 两个平台各自维护一份 Dockerfile 与构建脚本（有意复制，不互相引用）：CNB 推 `docker.cnb.cool`，GitHub Actions 推 `ghcr.io`。本篇讲 GitHub 侧的目录、触发方式、镜像地址、变量契约与已知差异；CNB 侧的平台层说明见 [CNB 流水线](cnb.md)，镜像自己的流水线细节见各镜像的 [ci-pipeline](alpine/ci-pipeline.md)。
+> 三个平台各自维护一份 Dockerfile 与构建脚本（有意复制，不互相引用）：CNB 推 `docker.cnb.cool`，GitHub Actions 推 `ghcr.io`，GitLab CI 推 `$CI_REGISTRY_IMAGE`。本篇讲 GitHub 侧的目录、触发方式、镜像地址、变量契约与已知差异；另两个平台的平台层说明见 [CNB 流水线](cnb.md) 与 [GitLab CI 与 Container Registry](gitlab.md)，镜像自己的流水线细节见各镜像的 [ci-pipeline](alpine/ci-pipeline.md)。
 
-## 设计前提：两份副本，各自演进
+## 设计前提：三份副本，各自演进
 
-GitHub 侧不 `source` CNB 的脚本，也不与 CNB 共用 Dockerfile。两个平台各有一份完整实现：
+GitHub 侧不 `source` CNB 的脚本，也不与 CNB 共用 Dockerfile。三个平台各有一份完整实现（下表只列 CNB / GitHub 两列，GitLab 侧的对应路径见 [gitlab.md](gitlab.md)）：
 
 | 职责       | CNB 侧                                                   | GitHub 侧                                                   |
 |------------|----------------------------------------------------------|-------------------------------------------------------------|
@@ -16,7 +16,7 @@ GitHub 侧不 `source` CNB 的脚本，也不与 CNB 共用 Dockerfile。两个�
 
 复制而不是共用的原因：两侧的标签规则、冒烟断言是同构的，但**平台胶水不同**——CNB 读 `CNB_*` 变量、用 `##[set-output]`、写 commit annotation、注释里还有「imports 改写」这类历史约束；GitHub 读 Actions 上下文、写 Step Summary/artifact、凭证与触发方式也不同。共用意味着任何一侧改平台细节都要考虑另一侧，也会把 CNB 的历史包袱带进 GitHub（反过来同样）。
 
-代价只有一条，且是硬性规则：**改镜像内容、标签规则、冒烟断言时，两份都要改**（见 [CONTRIBUTING](../CONTRIBUTING.md) 硬性规则）。改平台胶水（触发器、缓存、元数据落地）则只改自己那一份。
+代价只有一条，且是硬性规则：**改镜像内容、标签规则、冒烟断言时，三份都要改**（见 [CONTRIBUTING](../CONTRIBUTING.md) 硬性规则）。改平台胶水（触发器、缓存、元数据落地）则只改自己那一份。
 
 ## 镜像地址
 
@@ -146,7 +146,7 @@ gh run download <run-id> -n alpine-annotation
 
 ## 维护约定
 
-- **两份副本要同步**：改镜像内容（`.github/docker/`）或标签/冒烟/元数据（`.github/scripts/`）时，必须同时改 `.cnb/docker/` 与 `.cnb/scripts/` 里的对应实现。PR 里只改一侧，等于让两个 registry 推不同内容的同名标签。
+- **三份副本要同步**：改镜像内容（`.github/docker/`）或标签/冒烟/元数据（`.github/scripts/`）时，必须同时改 `.cnb/` 与 `.gitlab/` 里的对应实现。PR 里少改一侧，等于让三个 registry 推不同内容的同名标签。
 - **平台胶水各自维护**：触发器、时区、缓存后端、元数据落地、action 版本只改自己那一份，不要为了「统一」把 GitHub 侧的逻辑塞进 CNB 的 imports 体系，反之亦然。
 - workflow 里用到的 action（`actions/checkout`、`docker/setup-*` 等）版本由 [dependabot](../.github/dependabot.yml) 的 `github-actions` 生态扫描，升级后至少手动跑一次两条流水线。
 - 不要在 GitHub workflow 里改用 `docker/build-push-action` 的三行式构建：标签派生、冒烟、提升顺序都在 `.github/scripts/` 里，换成 action 等于把同一份契约再实现一遍。
@@ -154,6 +154,7 @@ gh run download <run-id> -n alpine-annotation
 ## 相关文档
 
 - [CNB 流水线（平台层）](cnb.md)
+- [GitLab CI 与 Container Registry（平台层）](gitlab.md)
 - [Alpine 镜像与标签](alpine/images-and-tags.md)
 - [Chromium 镜像与标签](chromium/images-and-tags.md)
 - [Alpine CI 流水线（CNB）](alpine/ci-pipeline.md)

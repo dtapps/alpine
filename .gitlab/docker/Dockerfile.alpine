@@ -1,0 +1,118 @@
+# ===================================================================
+# Alpine 基础镜像（GitLab 平台）：体积小、构建快、可追溯
+#
+# 这是 .cnb/docker/ 与 .github/docker/ 同名文件的 GitLab 侧副本：三个平台
+# 有意各留一份，不互相引用。改镜像内容（装包、时区）时三处都要改，否则
+# 三个 registry 会推出不同内容的同名标签。
+#
+# 基座跟随上游 latest-stable（定时任务每天重建，自动带上新补丁/新小版本）；
+# 「具体是哪个版本」不写死在这里，而是由 .gitlab/scripts/build-alpine.sh 解析后
+# 写进产物标签与 OCI label：
+#   alpine:latest  ──解析──>  3.25.1  ──打标签──>  3.25.1（每天重建会覆盖同名标签）
+# 需要复现某次构建时，用元数据里记录的 image_digest / base_digest，而不是 latest。
+#
+# 缓存：装包层的缓存键里带 APK_INDEX_DIGEST（构建脚本 apk update 后对 APKINDEX
+# 求的 sha256）。仓库里任何包升级都会让这个值变化、装包层重跑；索引没变则命中。
+# 因此「每天重建 = 刷新依赖」仍然成立，但没变化时不再白装一遍。
+# 元数据 LABEL 放在文件最后：created/revision/version 每次都变，放前面会让
+# 它下面的 RUN 层每天缓存失效。
+# ===================================================================
+
+# -------------------------------------------------------------------
+# 基础镜像版本
+#   latest        默认：跟随上游最新稳定版（定时任务的用法）
+#   3.25          跟随该分支的补丁（同 tag 产出会漂）
+#   3.25.1        钉死某个 patch
+#   3.25.1@sha256:<digest>  位级复现（审计、事故复盘）
+# -------------------------------------------------------------------
+ARG ALPINE_VERSION=latest
+FROM alpine:${ALPINE_VERSION}
+
+# FROM 之前声明的 ARG 在构建阶段不可见，必须在此重新声明才能用于 LABEL
+ARG ALPINE_VERSION
+ARG IMAGE_VERSION=dev
+ARG VCS_REF=unknown
+# 默认值取固定纪元时间而非当前时间：不传参时同一份源码构建出同样的镜像 config
+ARG BUILD_DATE=1970-01-01T00:00:00Z
+# 基础镜像的 manifest digest（CI 解析后传入）：钉住「这次的 alpine:latest 是哪一份」
+ARG BASE_DIGEST=unknown
+# APK 仓库索引指纹（CI 解析后传入）：装包层的缓存击穿点。
+# 脚本在基础镜像容器里 apk update 后对 APKINDEX 求 sha256；索引不变 → 缓存命中，
+# 任何包升级 → 值变化 → apk add 重跑。本地不传时保持 0，不影响构建。
+ARG APK_INDEX_DIGEST=0
+
+# 本镜像所在的代码仓库（OCI source/url）。构建脚本用 CI_PROJECT_URL 派生并
+# 传入；不设默认值，本地 docker build 时需自行 --build-arg。
+ARG IMAGE_SOURCE
+
+# -------------------------------------------------------------------
+# 时区与本地化
+#   TZ 只对「读到该环境变量」的程序生效；musl 的 tzset() 仍依赖
+#   tzdata 提供的 /usr/share/zoneinfo，两者必须配套。
+#   musl 只支持 C.UTF-8，写 en_US.UTF-8 不会报错、只会静默不生效。
+# -------------------------------------------------------------------
+ENV TZ=Asia/Shanghai \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
+# -------------------------------------------------------------------
+# 有意以 root 运行：本镜像是「进容器就能 apk add / 改配置」的调试基座。
+# 生产镜像请自行降权：
+#   RUN adduser -D -u 10001 app
+#   USER app
+# 不设 WORKDIR：基础镜像设了会被所有下游继承，等于替别人决定工作目录。
+# -------------------------------------------------------------------
+USER root
+
+# -------------------------------------------------------------------
+# 单层完成：装包 → 写时区 → 清缓存
+#   - 沿用基座自带的官方源（dl-cdn.alpinelinux.org，含 main + community）：
+#     GitLab SaaS runner 在境外，直连官方源最快，额外配国内镜像反而可能更慢
+#   - apk add --no-cache 自带索引拉取，不需要 apk update（省一整轮索引下载）
+#   - 清理必须与安装同层：跨层 rm 只产生 whiteout，旧层数据照样随镜像分发
+#   - 包名按字母序，便于 diff 与评审
+# -------------------------------------------------------------------
+RUN set -eux; \
+    echo "apk-index: ${APK_INDEX_DIGEST}"; \
+    apk add --no-cache \
+        ca-certificates \
+        curl \
+        drill \
+        git \
+        netcat-openbsd \
+        tzdata; \
+    ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime; \
+    echo "Asia/Shanghai" >/etc/timezone; \
+    rm -rf /var/cache/apk/* /tmp/* /var/tmp/* /root/.cache
+
+# -------------------------------------------------------------------
+# 包选择说明（体积为 v3.24 x86_64 实测安装体积 / 含依赖净增）
+#   ca-certificates  0.20 MiB / 0.20  HTTPS 校验基础，curl 与下游都依赖
+#   curl             0.27 MiB / 5.06  含 libunistring、brotli、zstd、libcurl 等传递依赖
+#   drill            0.06 MiB / 0.40  DNS 排查（dig 的轻量替代，省 6.6 MiB）
+#   git              6.71 MiB / 7.63  克隆代码、拉取依赖（含 libexpat、pcre2）
+#   netcat-openbsd   0.04 MiB / 0.16  端口探活 nc -zv（busybox 的 nc 不支持 -z）
+#   tzdata           0.43 MiB / 0.43  Asia/Shanghai 时区数据
+#
+# 需要真正的 dig 语法与输出：把 drill 换成 bind-tools（多 6.6 MiB，闭包 17 个包）
+# 只需要「能不能解析」：删掉 drill，用 busybox 自带的 nslookup（再省 0.4 MiB）
+# 官方源默认就开着 main + community，需要 community 的包直接 apk add 即可。
+# ===================================================================
+
+# -------------------------------------------------------------------
+# OCI 元数据标签（必须放在所有 RUN 之后）
+#   source / url  → 本镜像所在的代码仓库（不是 Docker Hub）
+#   base.*        → 基座是谁：FROM 用的那个 alpine 标签，以及它当次的 digest
+# 注意 base.name 按 OCI 规范指「基础镜像」，不是本镜像的存放位置。
+# created / revision / version 每次构建都会变；放在文件开头会让它下面所有层
+# （装包、时区、清理）的缓存键跟着变，registry 缓存就永远命不中。
+# -------------------------------------------------------------------
+LABEL org.opencontainers.image.source="${IMAGE_SOURCE}" \
+    org.opencontainers.image.url="${IMAGE_SOURCE}" \
+    org.opencontainers.image.revision="${VCS_REF}" \
+    org.opencontainers.image.created="${BUILD_DATE}" \
+    org.opencontainers.image.version="${IMAGE_VERSION}" \
+    org.opencontainers.image.description="Alpine 基础镜像：ca-certificates + curl + drill + git + nc + Asia/Shanghai 时区" \
+    org.opencontainers.image.licenses="MIT" \
+    org.opencontainers.image.base.name="alpine:${ALPINE_VERSION}" \
+    org.opencontainers.image.base.digest="${BASE_DIGEST}"

@@ -48,14 +48,16 @@
 - [SECURITY.md](../SECURITY.md) —— 支持范围、漏洞报告渠道、已知取舍
 - [README.md](../README.md) —— 仓库总览：两个镜像一览、快速使用、仓库结构
 - [cnb.md](cnb.md) —— CNB 平台层：内置变量与地址来源、事件矩阵、按钮/权限、imports、元数据、排错
-- [github.md](github.md) —— GitHub Actions 与 GHCR：两份副本的目录与同步规则、触发矩阵、变量契约、与 CNB 的差异
+- [github.md](github.md) —— GitHub Actions 与 GHCR：副本的目录与同步规则、触发矩阵、变量契约、与 CNB 的差异
+- [gitlab.md](gitlab.md) —— GitLab CI 与 Container Registry：dind/QEMU 构建现场、schedule、变量契约、与 GitHub 的差异
 - [cache-implementation.md](cache-implementation.md) —— 构建缓存实现：APK 索引指纹、registry 缓存、`CACHE` 开关与回滚
 
 ## 平台与流水线文档
 
-两个平台的文档结构对称：平台层一篇（触发、地址、权限、元数据），镜像层的流水线细节仍放在各镜像分册里。
+三个平台的文档结构对称：平台层一篇（触发、地址、权限、元数据），镜像层的流水线细节仍放在各镜像分册里。各镜像分册以 CNB / GitHub 为例描述，GitLab 侧的标签、缓存与冒烟契约相同，平台差异见 [gitlab.md](gitlab.md)。
 
 | 平台           | 平台层文档             | 镜像层文档                                                                                         |
 |----------------|------------------------|----------------------------------------------------------------------------------------------------|
 | CNB            | [cnb.md](cnb.md)       | [alpine/ci-pipeline.md](alpine/ci-pipeline.md)、[chromium/ci-pipeline.md](chromium/ci-pipeline.md) |
-| GitHub Actions | [github.md](github.md) | 同上（镜像细节与平台无关，两份副本保持一致）                                                       |
+| GitHub Actions | [github.md](github.md) | 同上（镜像细节与平台无关，三份副本保持一致）                                                       |
+| GitLab CI      | [gitlab.md](gitlab.md) | 同上                                                                                               |

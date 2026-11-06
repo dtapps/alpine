@@ -1,0 +1,48 @@
+# ===================================================================
+# build-alpine：构建并推送 Alpine 基础镜像到 $CI_REGISTRY_IMAGE
+#
+#   产物：<registry>/<namespace>/<project>（本仓库即 $CI_REGISTRY_IMAGE）
+#   实现：Dockerfile .gitlab/docker/Dockerfile.alpine
+#         构建脚本 .gitlab/scripts/build-alpine.sh
+#         对照实现 .github/workflows/build-alpine.yml（GHCR）
+#
+#   标签契约与 CNB / GitHub 完全一致（<alpine 版本> / <major.minor> / latest /
+#   <版本>-linux-{amd64,arm64}），详见 docs/alpine/images-and-tags.md。
+#
+#   stage alpine 先跑；build-chromium job needs 本 job，保证基座先就绪。
+#   基座跟随上游 latest，具体版本由脚本解析后写进标签与 OCI label。
+# ===================================================================
+build-alpine:
+  extends: .docker-build
+  stage: alpine
+  # 同一 resource_group 让 alpine / chromium、定时与手动、跨流水线全部串行：
+  # 对应 GitHub 侧的 concurrency.group + cancel-in-progress: false，避免并发改
+  # 同一批 latest / <minor> 标签，也避免两个 job 抢同一份 buildcache。
+  resource_group: alpine-image-build
+  timeout: 1h 30m
+  # rules 只判「这个 job 进不进流水线」，流水线是否存在看根文件的 workflow:rules。
+  # BUILD_TARGET=chromium 时本 job 连定义都不存在，chromium 用 needs.optional 兜住。
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $BUILD_TARGET != "chromium"'
+    - if: '$CI_PIPELINE_SOURCE == "web" && $BUILD_TARGET != "chromium"'
+    - when: never
+  script:
+    - |
+      set -eu
+      # CI_REGISTRY_PASSWORD 只在 job 内注入（临时 job token），脚本认的名字是
+      # REGISTRY_TOKEN；其余 CI_* 变量由脚本自己读，不必在这里拼镜像名。
+      export REGISTRY_TOKEN="$CI_REGISTRY_PASSWORD"
+      # 必须 source（POSIX 点命令）：脚本里的 set -eu、trap、dotenv 都留在当前 shell。
+      # 用 `sh .gitlab/scripts/build-alpine.sh` 跑会静默丢掉这些副作用。
+      . .gitlab/scripts/build-alpine.sh
+      echo '--- 构建元数据 ---'
+      cat .gitlab/annotation.json
+  # 标签每天被覆盖，历史只能靠 digest 追；JSON 留档 30 天便于回查。
+  # 对应 GitHub 侧的「写入运行摘要 + upload-artifact」两步。
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - .gitlab/annotation.json
+    reports:
+      dotenv: .gitlab/build.env

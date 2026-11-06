@@ -10,7 +10,9 @@ format-yaml:
 	@yamlfmt -conf .yamlfmt \
 		".cnb" \
 		".cnb.yml" \
-		".github" || { echo "❌ yamlfmt 格式化失败"; exit 1; }
+		".github" \
+		".gitlab" \
+		".gitlab-ci.yml" || { echo "❌ yamlfmt 格式化失败"; exit 1; }
 	@echo "[Format] YAML 格式化完成（yamlfmt）。"
 
 # 格式化 Markdown 文件
@@ -32,18 +34,19 @@ format-markdown:
 # 格式化 Shell 脚本
 # 脚本是 #!/bin/sh（POSIX），shfmt 的方言必须跟着改，否则 -ln bash 会把 POSIX
 # 写法当成 bash 合法化，本地通过、CNB 的 dash 上炸。
-# .cnb/scripts 与 .github/scripts 是两份副本（CNB / GitHub 各一份），一并格式化。
+# .cnb/scripts、.github/scripts、.gitlab/scripts 是三份副本（CNB / GitHub / GitLab
+# 各一份），一并格式化。
 .PHONY: format-shell
 format-shell:
 	@echo "[Format] 格式化脚本 (Shell)…"
-	@shfmt -w -i 2 -ci -bn -s -ln posix .cnb/scripts/ .github/scripts/ || { echo "❌ shfmt 格式化失败"; exit 1; }
+	@shfmt -w -i 2 -ci -bn -s -ln posix .cnb/scripts/ .github/scripts/ .gitlab/scripts/ || { echo "❌ shfmt 格式化失败"; exit 1; }
 	@echo "[Format] Shell 格式化完成（shfmt）。"
 
 # 静态检查：shellcheck 按 POSIX sh 方言检查 CI 脚本
 .PHONY: lint-shell
 lint-shell:
 	@echo "[Lint] 检查脚本 (ShellCheck)…"
-	@shellcheck -s sh -S warning .cnb/scripts/*.sh .github/scripts/*.sh || { echo "❌ shellcheck 未通过"; exit 1; }
+	@shellcheck -s sh -S warning .cnb/scripts/*.sh .github/scripts/*.sh .gitlab/scripts/*.sh || { echo "❌ shellcheck 未通过"; exit 1; }
 	@echo "[Lint] ShellCheck 通过。"
 
 # 格式化 Dockerfile 文件
@@ -51,11 +54,11 @@ lint-shell:
 .PHONY: format-docker
 format-docker:
 	@echo "[Format] 格式化 Dockerfile..."
-	@find .cnb .github -type f -name "Dockerfile*" -exec dockerfmt -w -n {} + || { echo "❌ dockerfmt 格式化失败"; exit 1; }
+	@find .cnb .github .gitlab -type f -name "Dockerfile*" -exec dockerfmt -w -n {} + || { echo "❌ dockerfmt 格式化失败"; exit 1; }
 	@echo "[Format] Dockerfile 格式化完成（dockerfmt）。"
 
-# 拉取所有远程最新（先 CNB，后 GitHub 镜像）然后强制推送
-sync: sync-cnb sync-github push-force
+# 拉取所有远程最新（先 CNB，后 GitHub 再 GitLab 镜像）然后推送
+sync: sync-cnb sync-github sync-gitlab push
 
 # 拉取 CNB 最新并以 fast-forward 合并（保留本地未提交改动）
 sync-cnb:
@@ -69,14 +72,22 @@ sync-github:
 	git merge --ff-only github/main
 	@echo "已同步 github/main 最新代码，本地未提交改动已保留"
 
+# 拉取 GitLab 最新并以 fast-forward 合并（保留本地未提交改动）
+sync-gitlab:
+	git fetch gitlab
+	git merge --ff-only gitlab/main
+	@echo "已同步 gitlab/main 最新代码，本地未提交改动已保留"
+
 # 推送到所有远程仓库
 push: 
 	git push origin HEAD
 	git push github HEAD
+	git push gitlab HEAD
 	@echo "推送完成！"
 
 # 强制推送到所有远程仓库（忽略冲突）
 push-force:
 	git push --force origin HEAD
 	git push --force github HEAD
+	git push --force gitlab HEAD
 	@echo "强制推送完成！"

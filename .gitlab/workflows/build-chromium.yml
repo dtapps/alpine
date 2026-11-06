@@ -1,0 +1,45 @@
+# ===================================================================
+# build-chromium：构建并推送 Chromium 镜像到 $CI_REGISTRY_IMAGE/chromium
+#
+#   产物：<registry>/<namespace>/<project>/chromium
+#   实现：Dockerfile .gitlab/docker/Dockerfile.chromium
+#         构建脚本 .gitlab/scripts/build-chromium.sh
+#         对照实现 .github/workflows/build-chromium.yml（GHCR）
+#
+#   基座：同一条流水线里 build-alpine 产出的 $CI_REGISTRY_IMAGE，脚本按 version
+#         找到同名标签、取 digest 钉住；基座不存在时直接失败，不退回官方 alpine。
+#   标签与 Alpine 基座同一套契约，详见 docs/chromium/images-and-tags.md。
+# ===================================================================
+build-chromium:
+  extends: .docker-build
+  stage: chromium
+  # optional: true：手动只跑 chromium（BUILD_TARGET=chromium）时 build-alpine
+  #           根本不在流水线里，needs 不能因此把本 job 判成配置错误。
+  # artifacts: false：两个 job 都写 .gitlab/annotation.json，默认继承上一 stage
+  #           的产物会把 alpine 的元数据当成本 job 的产物上传。
+  needs:
+    - job: build-alpine
+      artifacts: false
+      optional: true
+  # 与 build-alpine 同一组：串行执行，不并发改 latest / <minor>。
+  resource_group: alpine-image-build
+  # arm64 走 QEMU 模拟，chromium 的闭包很大，多架构一次要几十分钟。
+  timeout: 2h
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $BUILD_TARGET != "alpine"'
+    - if: '$CI_PIPELINE_SOURCE == "web" && $BUILD_TARGET != "alpine"'
+    - when: never
+  script:
+    - |
+      set -eu
+      export REGISTRY_TOKEN="$CI_REGISTRY_PASSWORD"
+      . .gitlab/scripts/build-chromium.sh
+      echo '--- 构建元数据 ---'
+      cat .gitlab/annotation.json
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - .gitlab/annotation.json
+    reports:
+      dotenv: .gitlab/build.env

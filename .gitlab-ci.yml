@@ -1,0 +1,127 @@
+# ===================================================================
+# GitLab CI：构建并推送 Alpine 基础镜像 / Chromium 镜像到 GitLab Container Registry
+#
+#   与 .cnb.yml + .github/workflows/ 同语义：定时跟上游 + 手动重建，
+#   平台各维护一份 Dockerfile 与构建脚本（有意复制，不互相引用）。
+#   GitLab 侧独立维护：
+#     · Dockerfile  .gitlab/docker/Dockerfile.{alpine,chromium,headless}
+#     · 构建脚本    .gitlab/scripts/build-{alpine,chromium}.sh
+#     · 流水线      本文件（全局）+ .gitlab/workflows/*.yml（两个 job）
+#
+#   触发只有两条（和 GitHub 侧一致）：Pipeline schedules / Run pipeline。
+#   push、merge_request、tag 一律不建流水线，见下面的 workflow:rules。
+#
+# 文件分工（include 在流水线创建时被展开合并成一份配置，没有运行时模块加载）：
+#   本文件（必须在仓库根，GitLab 只认这个路径）
+#                    workflow / stages / variables / default / .docker-build 片段
+#   .gitlab/workflows/build-alpine.yml     build-alpine job（stage: alpine）
+#   .gitlab/workflows/build-chromium.yml   build-chromium job（stage: chromium）
+#
+# 一条流水线两个 job，顺序天然保证「先基座后 Chromium」：
+#   build-chromium needs build-alpine（optional: true，手动只跑 chromium 时也成立）。
+#   GitHub 侧靠两条 cron 错开 1 小时；GitLab 的 schedule 只能在网页里建，
+#   一条 schedule 就会把两个 job 都带起来，所以不必再错峰。见 docs/gitlab.md。
+#
+# 两道纪律，破坏了就会出怪事：
+#   1. 一个 job 只在一个文件里定义。同名 job 跨文件是**深合并**，不是整体覆盖
+#   2. default / variables / stages / workflow 只写在根文件。before_script 写在
+#      .docker-build 里由两个 job extends；job 里再写 before_script 会整体替换它
+#
+# 用法：CI/CD → Pipelines → Run pipeline，按需填下面带 description 的变量。
+#       定时任务：CI/CD → Schedules 新建一条（默认分支，建议 18:35 UTC）。
+# ===================================================================
+include:
+  - local: '.gitlab/workflows/build-alpine.yml'
+  - local: '.gitlab/workflows/build-chromium.yml'
+
+# 什么时候创建流水线——不匹配时流水线根本不存在，不会出现「有流水线但 job 全被过滤」。
+#   schedule（默认分支）/ web（Run pipeline）；其它（push / MR / tag / API）一律不建。
+# 与 GitHub 侧「只有 schedule + workflow_dispatch」等价。
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - when: never
+
+# 两个 stage 表达依赖方向：先出基座，再消费基座。
+stages:
+  - alpine
+  - chromium
+
+variables:
+  # Run pipeline 页面把带 description 的变量列成表单，语义与 GitHub 的 inputs 一致。
+  version:
+    value: ''
+    description: '选填：Alpine 版本。留空/latest = 跟随上游；alpine job 还可填 3.25 / 3.25.1 / 3.25.1@sha256:<64 位 hex>；chromium job 只接受 latest
+      / 3.25 / 3.25.1'
+  expected_chromium_major:
+    value: ''
+    description: '选填（仅 chromium）：Chromium 主版本断言。留空 = 不校验；填 156 = 确认上游升级；填 any = 跳过断言'
+  BUILD_TARGET:
+    value: 'both'
+    description: 'both = 两个镜像都构建（定时/默认）；alpine / chromium = 只跑对应的那一个 job'
+  CACHE:
+    value: 'on'
+    description: 'on = 用 <镜像>:buildcache 的 registry 缓存；off = --no-cache 全量重建'
+  # docker:dind 的 TLS 配置：必须写在全局 variables 里，service 容器也要读到，
+  # 且 runner 会据此在 job 与 dind 之间共享 /certs 卷。
+  # 换 Docker 版本时 .docker-build 里的 image 与 services 要一起改。
+  DOCKER_HOST: 'tcp://docker:2376'
+  DOCKER_TLS_CERTDIR: '/certs'
+  DOCKER_CERT_PATH: '$DOCKER_TLS_CERTDIR/client'
+  DOCKER_TLS_VERIFY: '1'
+  # git log -1 --format=%cI（BUILD_DATE）需要提交对象，浅克隆保留 20 个足够。
+  GIT_DEPTH: '20'
+  # binfmt 注册 arm64 解释器，等价于 GitHub 侧的 setup-qemu-action。
+  # 自托管 runner 必须允许 privileged 容器，否则这一步会失败。
+  QEMU_BINFMT_IMAGE: 'tonistiigi/binfmt:latest'
+
+# interruptible: false 等价于 GitHub 侧的 cancel-in-progress: false：
+# 正在推 manifest 的 job 被新流水线打断，会留下半套标签。
+default:
+  interruptible: false
+
+# ---------------------------------------------------------------------------
+# 两个 job 共用的构建现场。extends 是深合并：job 里再写同名 key 会**整体替换**
+# 这里的数组/映射，所以 job 只写 stage / script / rules / artifacts 等。
+#
+#   · docker:cli + docker:dind：GitLab 没有预置的 buildx builder，dind 是唯一能跑
+#     docker-container driver / 多架构 manifest / registry 缓存的方式
+#   · QEMU/binfmt：arm64 层在 amd64 runner 上靠 binfmt 执行，缺了会在 apk add 报
+#     exec format error
+#   · docker context：dind 走 TLS，buildx 不接受「从环境变量读 TLS 数据」来创建
+#     docker-container builder，必须先把 endpoint + 证书写进一个 context
+#   · buildx create：docker-container driver 才能一次产出 manifest list 并 --push
+#   · 登录交给脚本自己（它用 REGISTRY_TOKEN / REGISTRY_USER），这里只准备环境
+# ---------------------------------------------------------------------------
+.docker-build:
+  image:
+    name: 'docker:28-cli'
+    entrypoint: ['']
+  services:
+    - name: 'docker:28-dind'
+      alias: docker
+  before_script:
+    # dotenv 报告先建空文件：放在第一步，后面任何一步失败时报告也不会缺文件
+    - 'mkdir -p .gitlab && : > .gitlab/build.env'
+    - apk add --no-cache git jq
+    - git config --global --add safe.directory "$CI_PROJECT_DIR"
+    - |
+      set -eu
+      # dind 服务是异步起来的，第一次 docker info 往往还连不上
+      i=0
+      while [ "$i" -lt 30 ]; do
+        docker info >/dev/null 2>&1 && break
+        i=$((i + 1))
+        sleep 2
+      done
+      docker info
+    - docker run --rm --privileged "$QEMU_BINFMT_IMAGE" --install arm64
+    # DOCKER_HOST / DOCKER_TLS_VERIFY / DOCKER_CERT_PATH 能直接给 docker 客户端用，
+    # 但 buildx 创建 docker-container builder 时会报「could not create a builder
+    # instance with TLS data loaded from environment」。把 endpoint 与证书写进一个
+    # docker context，再把这个 context 作为 buildx 的 endpoint。
+    - >-
+      docker context create alpine-builder-context --docker "host=$DOCKER_HOST,ca=$DOCKER_CERT_PATH/ca.pem,cert=$DOCKER_CERT_PATH/cert.pem,key=$DOCKER_CERT_PATH/key.pem"
+    - docker buildx create --name alpine-builder --driver docker-container --bootstrap --use alpine-builder-context
+    - docker buildx inspect --bootstrap

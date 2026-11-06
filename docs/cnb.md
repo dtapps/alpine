@@ -1,6 +1,6 @@
 # CNB 流水线（平台层）
 
-> 和 [GitHub Actions 与 GHCR](github.md) 对称的一篇：讲 CNB 侧怎么触发、镜像地址从哪来、元数据怎么落地、与 GitHub 侧差在哪。镜像自己的流水线细节（每个事件做什么、插件参数、冒烟断言）仍在 [Alpine CI 流水线](alpine/ci-pipeline.md) 与 [Chromium CI 流水线](chromium/ci-pipeline.md)。
+> 和 [GitHub Actions 与 GHCR](github.md) 对称的一篇：讲 CNB 侧怎么触发、镜像地址从哪来、元数据怎么落地、与 GitHub 侧差在哪。镜像自己的流水线细节（每个事件做什么、插件参数、冒烟断言）仍在 [Alpine CI 流水线](alpine/ci-pipeline.md) 与 [Chromium CI 流水线](chromium/ci-pipeline.md)。第三份实现（GitLab CI）见 [GitLab CI 与 Container Registry](gitlab.md)。
 
 ## 目录与职责
 
@@ -14,7 +14,7 @@
 | `.cnb/annotation.json` | 构建生成的元数据（`.gitignore` 已排除），由 annotation 插件读取 |
 | `.cnb/security/`       | 代码扫描配置                                                    |
 
-GitHub 侧有一份对应的副本（`.github/`），两边不互相引用，见文末「两份副本的同步」。
+GitHub 与 GitLab 侧各有一份对应的副本（`.github/`、`.gitlab/`），三边不互相引用，见文末「三份副本的同步」。
 
 ## 镜像地址不是写死的
 
@@ -88,9 +88,9 @@ IMAGE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}/chromium" # Chromium �
 
 标签契约两边一致（`<alpine 版本>` / `<major.minor>` / `latest` + `-linux-{arch}` 派生），但各自构建、digest 不通用。
 
-## 两份副本的同步
+## 三份副本的同步
 
-`.cnb/` 与 `.github/` 是**有意复制**的两份实现：平台胶水（变量来源、缓存、元数据落地、触发器）各自维护；镜像内容、标签规则、冒烟断言**必须两边一起改**（见 [CONTRIBUTING](../CONTRIBUTING.md) 硬性规则）。只改一侧会让两个 registry 推出不同内容的同名标签。
+`.cnb/`、`.github/`、`.gitlab/` 是**有意复制**的三份实现：平台胶水（变量来源、缓存、元数据落地、触发器）各自维护；镜像内容、标签规则、冒烟断言**必须三边一起改**（见 [CONTRIBUTING](../CONTRIBUTING.md) 硬性规则）。少改一侧会让三个 registry 推出不同内容的同名标签，GitLab 侧的目录与触发方式见 [gitlab.md](gitlab.md)。
 
 ## 排错入口
 
