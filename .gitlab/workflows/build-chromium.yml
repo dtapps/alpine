@@ -13,7 +13,7 @@
 build-chromium:
   extends: .docker-build
   stage: chromium
-  # optional: true：手动只跑 chromium（BUILD_TARGET=chromium）时 build-alpine
+  # optional: true：手动只跑 chromium（TARGET=chromium）时 build-alpine
   #           根本不在流水线里，needs 不能因此把本 job 判成配置错误。
   # artifacts: false：两个 job 都写 .gitlab/annotation.json，默认继承上一 stage
   #           的产物会把 alpine 的元数据当成本 job 的产物上传。
@@ -26,13 +26,16 @@ build-chromium:
   # arm64 走 QEMU 模拟，chromium 的闭包很大，多架构一次要几十分钟。
   timeout: 2h
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $BUILD_TARGET != "alpine"'
-    - if: '$CI_PIPELINE_SOURCE == "web" && $BUILD_TARGET != "alpine"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $TARGET != "alpine"'
+    - if: '$CI_PIPELINE_SOURCE == "web" && $TARGET != "alpine"'
     - when: never
   script:
     - |
       set -eu
       export REGISTRY_TOKEN="$CI_REGISTRY_PASSWORD"
+      # 表单变量 → 脚本变量：与 GitHub 侧 inputs 语义一致。
+      export version="${VERSION:-}"
+      export expected_chromium_major="${EXPECTED_CHROMIUM_MAJOR:-}"
       . .gitlab/scripts/build-chromium.sh
       echo '--- 构建元数据 ---'
       cat .gitlab/annotation.json

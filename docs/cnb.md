@@ -75,16 +75,16 @@ IMAGE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}/chromium" # Chromium �
 
 ## 与 GitHub 侧的差异
 
-| 维度     | CNB                                                         | GitHub Actions                                                 |
-|----------|-------------------------------------------------------------|----------------------------------------------------------------|
-| 地址来源 | `CNB_DOCKER_REGISTRY` + `CNB_REPO_SLUG_LOWERCASE`           | `ghcr.io` + `GITHUB_REPOSITORY`（小写）                        |
-| 登录凭证 | `CNB_TOKEN` / `CNB_TOKEN_USER_NAME`（组织密钥仓库 imports） | `secrets.GITHUB_TOKEN`（Actions 临时签发）                     |
-| builder  | `services: docker` 自带多架构 buildx                        | `docker/setup-qemu-action` + `docker/setup-buildx-action` 现装 |
-| arm64    | runner 内置 binfmt                                          | QEMU 模拟（chromium 多架构要几十分钟）                         |
-| 缓存     | 两个镜像都用 registry 缓存（`<镜像>:buildcache`）           | 同左，CNB/GitHub 结构一致                                      |
-| 定时任务 | `main` 下 `crontab`，北京时间 00:05 / 01:05                 | `on.schedule`，UTC 16:35 / 17:35（= 北京时间 00:35 / 01:35）   |
-| 元数据   | `.cnb/annotation.json` → commit annotation → 徽章           | `.github/annotation.json` → Step Summary + artifact            |
-| 手动入口 | `web_trigger.yml` 按钮 + 输入项                             | `workflow_dispatch` + inputs                                   |
+| 维度     | CNB                                                         | GitHub Actions                                                         |
+|----------|-------------------------------------------------------------|------------------------------------------------------------------------|
+| 地址来源 | `CNB_DOCKER_REGISTRY` + `CNB_REPO_SLUG_LOWERCASE`           | `ghcr.io` + `GITHUB_REPOSITORY`（小写）                                |
+| 登录凭证 | `CNB_TOKEN` / `CNB_TOKEN_USER_NAME`（组织密钥仓库 imports） | `secrets.GITHUB_TOKEN`（Actions 临时签发）                             |
+| builder  | `services: docker` 自带多架构 buildx                        | `docker/setup-qemu-action` + `docker/setup-buildx-action` 现装         |
+| arm64    | runner 内置 binfmt                                          | QEMU 模拟（chromium 多架构要几十分钟）                                 |
+| 缓存     | 两个镜像都用 registry 缓存（`<镜像>:buildcache`）           | 同左，CNB/GitHub 结构一致                                              |
+| 定时任务 | `main` 下 `crontab`，北京时间 00:05 / 01:05                 | `on.schedule`，UTC 16:05 / 17:05（= 北京时间 00:05 / 01:05，同一时刻） |
+| 元数据   | `.cnb/annotation.json` → commit annotation → 徽章           | `.github/annotation.json` → Step Summary + artifact                    |
+| 手动入口 | `web_trigger.yml` 按钮 + 输入项                             | `workflow_dispatch` + inputs                                           |
 
 标签契约两边一致（`<alpine 版本>` / `<major.minor>` / `latest` + `-linux-{arch}` 派生），但各自构建、digest 不通用。
 

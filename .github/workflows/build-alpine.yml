@@ -21,7 +21,7 @@
 # docs/alpine/images-and-tags.md。
 #
 # 下游：build-chromium workflow 的基座就是这里产出的 latest / <version>，
-# 所以 16:35 UTC 必须早于 Chromium 的 17:35 UTC（间隔 1 小时）。
+# 所以 16:05 UTC 必须早于 Chromium 的 17:05 UTC（间隔 1 小时）。
 # ===================================================================
 # https://github.com/actions/runner-images
 # https://github.com/actions/checkout
@@ -32,10 +32,10 @@ name: build-alpine
 
 on:
   schedule:
-    # 每天 00:35（Asia/Shanghai）= 16:35 UTC。GitHub 的 cron 只按 UTC 解析，
-    # 直接抄 CNB 的 5 0 * * * 会在北京时间 08:05 跑。比 CNB 的 00:05 晚 30 分钟：
-    # 两个平台各自拉上游 alpine 镜像源，错开一点避免同一分钟抢同一批索引。
-    - cron: '35 16 * * *'
+    # 每天 00:05（Asia/Shanghai）= 16:05 UTC，与 CNB 的 `5 0 * * *` 同一时刻。
+    # GitHub 的 cron 只按 UTC 解析，直接抄 CNB 的 5 0 * * * 会在北京时间 08:05 跑；
+    # 所以换算成 `5 16 * * *`（前一天 16:05 UTC）。
+    - cron: '5 16 * * *'
   workflow_dispatch:
     inputs:
       version:

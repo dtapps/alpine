@@ -49,17 +49,17 @@ stages:
   - chromium
 
 variables:
-  # Run pipeline 页面把带 description 的变量列成表单，语义与 GitHub 的 inputs 一致。
-  version:
+  # Run pipeline 页面会把带 description 的变量列成表单，方便手填。
+  TARGET:
     value: ''
-    description: '选填：Alpine 版本。留空/latest = 跟随上游；alpine job 还可填 3.25 / 3.25.1 / 3.25.1@sha256:<64 位 hex>；chromium job 只接受 latest
-      / 3.25 / 3.25.1'
-  expected_chromium_major:
+    description: '要构建的镜像：留空 = 两个都构建（定时/默认）；也可填 alpine / chromium，只跑那一个 job'
+  VERSION:
+    value: ''
+    description: '选填：Alpine 版本。留空 = 跟随上游 latest；alpine job 还可填 3.25 / 3.25.1 @sha256:<64 位 hex>；chromium job 只接受 latest /
+      3.25 / 3.25.1'
+  EXPECTED_CHROMIUM_MAJOR:
     value: ''
     description: '选填（仅 chromium）：Chromium 主版本断言。留空 = 不校验；填 156 = 确认上游升级；填 any = 跳过断言'
-  BUILD_TARGET:
-    value: 'both'
-    description: 'both = 两个镜像都构建（定时/默认）；alpine / chromium = 只跑对应的那一个 job'
   CACHE:
     value: 'on'
     description: 'on = 用 <镜像>:buildcache 的 registry 缓存；off = --no-cache 全量重建'

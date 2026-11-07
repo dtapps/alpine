@@ -21,10 +21,10 @@ build-alpine:
   resource_group: alpine-image-build
   timeout: 1h 30m
   # rules 只判「这个 job 进不进流水线」，流水线是否存在看根文件的 workflow:rules。
-  # BUILD_TARGET=chromium 时本 job 连定义都不存在，chromium 用 needs.optional 兜住。
+  # TARGET=chromium 时本 job 连定义都不存在，chromium 用 needs.optional 兜住。
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $BUILD_TARGET != "chromium"'
-    - if: '$CI_PIPELINE_SOURCE == "web" && $BUILD_TARGET != "chromium"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $TARGET != "chromium"'
+    - if: '$CI_PIPELINE_SOURCE == "web" && $TARGET != "chromium"'
     - when: never
   script:
     - |
@@ -32,6 +32,8 @@ build-alpine:
       # CI_REGISTRY_PASSWORD 只在 job 内注入（临时 job token），脚本认的名字是
       # REGISTRY_TOKEN；其余 CI_* 变量由脚本自己读，不必在这里拼镜像名。
       export REGISTRY_TOKEN="$CI_REGISTRY_PASSWORD"
+      # VERSION（表单）→ version（脚本）：与 GitHub 侧 inputs 语义一致。
+      export version="${VERSION:-}"
       # 必须 source（POSIX 点命令）：脚本里的 set -eu、trap、dotenv 都留在当前 shell。
       # 用 `sh .gitlab/scripts/build-alpine.sh` 跑会静默丢掉这些副作用。
       . .gitlab/scripts/build-alpine.sh

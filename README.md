@@ -21,7 +21,7 @@ GitLab 侧的地址由 `CI_REGISTRY_IMAGE` 派生，不写死在流水线里（f
 
 - **定位不同**：前者是「进容器就能 `apk add` / `curl` / `drill` / `git` / `nc` 的调试基座」，几十 MB；后者是「容器里跑无头浏览器」的运行环境，数百 MB，并继承前者的工具与配置。
 - **依赖关系**：Chromium 镜像 `FROM` 本仓库构建的 Alpine 基础镜像（CI 按 `<仓库 slug>:<alpine 版本>` 解析 digest 钉住），不基于 Docker Hub 的官方 `alpine`；Dockerfile 的默认基座仍是官方 `alpine:${ALPINE_VERSION}`，只服务不依赖私有仓库的本地构建。`-headless` 不再是发布变体，需要时用三个平台各自的 `Dockerfile.headless` 基于已发布镜像自行派生。
-- **发布有先后**：CNB 与 GitHub 各用两条定时任务（CNB `00:05` / `01:05`，GitHub `16:35 UTC` / `17:35 UTC`）；GitLab 的一条 schedule 会把 `build-alpine` → `build-chromium` 串在同一条流水线里，天然保证顺序。基座标签缺失时 Chromium 构建直接失败，三个平台各自等待自己的基座，digest 互不通用。
+- **发布有先后**：三个平台定时对齐（CNB `00:05` / `01:05`；GitHub cron 是 UTC，换算成 `16:05 / 17:05 UTC` = 同时刻；GitLab 一条 schedule，cron 用 `5 0`/`5 1` 并在 Cron timezone 里选 `Asia/Shanghai`）。GitLab 的一条 schedule 会把 `build-alpine` → `build-chromium` 串在同一条流水线里，天然保证顺序；CNB / GitHub 分两条 cron（Alpine 先，Chromium 晚 1 小时）。基座标签缺失时 Chromium 构建直接失败，三个平台各自等待自己的基座，digest 互不通用。
 - **标签同构**：三个平台、两个镜像都用同一套 5 标签契约：`<alpine 版本>` / `<major.minor>` / `latest` / `<版本>-linux-{amd64,arm64}`；Chromium 挂在子路径 `/chromium` 下，命名空间独立。`latest` 与 minor 只在基座同名标签已对齐时提升。详见各自的 `images-and-tags.md`。
 
 ## 快速使用

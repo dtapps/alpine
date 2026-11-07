@@ -283,7 +283,7 @@ while [ "${attempt}" -lt "${BASE_WAIT_ATTEMPTS}" ]; do
   sleep "${BASE_WAIT_SECONDS}"
 done
 docker buildx imagetools inspect "${BASE_REF}" >/dev/null 2>&1 \
-  || die "找不到基座 ${BASE_REF}：先运行 build-alpine workflow 并传入相同的 version（latest 由每日 16:35 UTC 任务产出），再重试"
+  || die "找不到基座 ${BASE_REF}：先运行 build-alpine workflow 并传入相同的 version（latest 由每日 16:05 UTC 任务产出），再重试"
 
 info "解析基座 ${BASE_REF} 的实际 Alpine 版本"
 ALPINE_REAL="$(docker run --rm --platform linux/amd64 "${BASE_REF}" \

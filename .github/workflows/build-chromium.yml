@@ -10,13 +10,13 @@
 #         · 对照实现    .cnb/docker/Dockerfile.* + .cnb/scripts/build-chromium.sh
 #
 #   基座：本仓库构建的 Alpine 基础镜像（ghcr.io/<owner>/<repo>），由
-#         build-alpine workflow 产出；定时任务排在它之后 1 小时（16:35 UTC → 17:35 UTC）。
+#         build-alpine workflow 产出；定时任务排在它之后 1 小时（16:05 UTC → 17:05 UTC）。
 #         基座不存在时构建直接失败，不会退回官方 alpine。
 #   触发：schedule（每天跟上游）/ workflow_dispatch
 #         只有这两条：不在 push / pull_request 上自动构建。
 #
 # 与 CNB 版的差异（复制之后各自演进）：
-#   1. 定时任务 01:35 Asia/Shanghai = 17:35 UTC（GitHub cron 只认 UTC）；
+#   1. 定时任务 01:05 Asia/Shanghai = 17:05 UTC（GitHub cron 只认 UTC）；
 #   2. 构建器与 QEMU 由 workflow 现装；chromium 的闭包很大，先释放磁盘；
 #   3. 层缓存用 registry 缓存（type=registry，<镜像>:buildcache），与 CNB 侧同构；
 #   4. arm64 走 QEMU 模拟，多架构一次要几十分钟，超时给到 120 分钟；
@@ -34,11 +34,10 @@ name: build-chromium
 
 on:
   schedule:
-    # 每天 01:35（Asia/Shanghai）= 17:35 UTC。必须排在 GitHub 自己的 Alpine
-    # 任务（16:35 UTC）之后 1 小时：Chromium 的基座就是那次构建产出的
-    # ghcr.io/<owner>/<repo>:latest。错峰同时避免 chromium 多架构构建与基座构建
-    # 抢上游镜像源带宽。
-    - cron: '35 17 * * *'
+    # 每天 01:05（Asia/Shanghai）= 17:05 UTC，与 CNB 的 `5 1 * * *` 同一时刻。
+    # 必须排在 GitHub 自己的 Alpine 任务（16:05 UTC）之后 1 小时：Chromium 的基座
+    # 就是那次构建产出的 ghcr.io/<owner>/<repo>:latest。
+    - cron: '5 17 * * *'
   workflow_dispatch:
     inputs:
       version:

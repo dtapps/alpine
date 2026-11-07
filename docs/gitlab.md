@@ -43,24 +43,47 @@ docker run --rm registry.gitlab.com/dtapps/alpine/chromium:latest chromium --ver
 
 标签契约与另两个平台完全一致：`<alpine 版本>`、`<major.minor>`、`latest`，加上 `<alpine 版本>-linux-{amd64,arm64}` 派生形式。`-cjk` / `-headless` 不再发布，需要时用 `WITH_CJK=1` / `.gitlab/docker/Dockerfile.headless` 自行派生。
 
-## 触发矩阵
+## 触发：定时与手动
 
 流水线创建与否只由根 `.gitlab-ci.yml` 的 `workflow:rules` 决定；job 是否进入流水线由各自 `rules` 决定。两层分开，避免「有流水线但没有可见 job」的配置错误。
 
-| 事件                                 | build-alpine               | build-chromium           | 行为                                                  |
-|--------------------------------------|----------------------------|--------------------------|-------------------------------------------------------|
-| `schedule`（默认分支）               | `BUILD_TARGET != chromium` | `BUILD_TARGET != alpine` | 每天跟上游重建；两个 job 串在同一条流水线里           |
-| `web`（Run pipeline）                | 同上                       | 同上                     | 手动构建；`BUILD_TARGET` 选择跑哪个镜像               |
-| `push` / `merge_request` / tag / api | 不创建流水线               | 不创建流水线             | 与 GitHub 侧「只有 schedule + workflow_dispatch」等价 |
+| 事件                                 | build-alpine         | build-chromium     | 行为                                                  |
+|--------------------------------------|----------------------|--------------------|-------------------------------------------------------|
+| `schedule`（默认分支）               | `TARGET != chromium` | `TARGET != alpine` | 每天跟上游重建；两个 job 串在同一条流水线里           |
+| `web`（Run pipeline）                | 同上                 | 同上               | 手动构建；`TARGET` 选择跑哪个镜像                     |
+| `push` / `merge_request` / tag / api | 不创建流水线         | 不创建流水线       | 与 GitHub 侧「只有 schedule + workflow_dispatch」等价 |
 
-`BUILD_TARGET` 默认为 `both`：两个 job 都在；填 `alpine` 只跑基座；填 `chromium` 跳过基座，直接消费已有标签（适合 Chromium 断言失败后重跑）。定时任务在 **CI/CD → Schedules** 网页里建，一条就够，建议 `35 18 * * *`（按 GitLab 实例时区解析，GitLab.com 是 UTC），比 GitHub 的 `17:35 UTC` 晚一小时错开上游镜像源。
+### 定时：一条网页 schedule
+
+GitLab 的 cron 不在 YAML 里，定时任务要建在 **CI/CD → Schedules**（或 API）里。时间以 CNB 的 Asia/Shanghai 定时为准（Alpine 基座 `00:05`），与 GitHub 的 `schedule` 同刻；GitLab 一条 schedule 会把 `build-alpine` → `build-chromium` 用 `needs` 串在同一条流水线里，所以**不需要像 GitHub 那样分两条 cron**。
+
+> GitLab 的 Pipeline schedule 创建时可选 cron 时区。**推荐把时区选成 `Asia/Shanghai`，直接照抄下表的 cron，零换算**；若用默认 `UTC`（GitLab.com 实例即是），则按右侧 UTC 一列填。
+
+| 镜像                      | 建议 cron（Asia/Shanghai） | 对应 UTC（cron 选 UTC 时用） | 变量             |
+|---------------------------|----------------------------|------------------------------|------------------|
+| alpine + chromium（串行） | `5 0 * * *`（00:05）       | `5 16 * * *`（16:05 UTC）    | `TARGET`（留空） |
+
+只建这一条、变量保持 `TARGET` 留空（默认）即可：两个 job 按 `stage: alpine → chromium` 顺序在一条流水线里跑完，每天 `00:05`（Asia/Shanghai）与 CNB / GitHub 的基座构建同一时刻，Chromium 紧跟着基座也在此刻产出。
+
+### 手动：Run pipeline
+
+手动发布：**CI/CD → Pipelines → Run pipeline**，在表单里填：
+
+| 变量                      | 说明                                                                                 | 对应 GitHub 输入          |
+|---------------------------|--------------------------------------------------------------------------------------|---------------------------|
+| `TARGET`                  | 留空 = 两个镜像都构建（默认）；`alpine` / `chromium` 只跑对应那一个 job              | —                         |
+| `VERSION`                 | Alpine 版本；留空 = 跟随上游 / 基座 `latest`；可填 `3.25` / `3.25.1` / digest        | `version`                 |
+| `EXPECTED_CHROMIUM_MAJOR` | Chromium 主版本断言（仅 chromium）；留空不校验，填 `156` 确认上游升级，填 `any` 跳过 | `expected_chromium_major` |
+| `CACHE`                   | `on` / `off`；`off` = 不用 `<镜像>:buildcache` 缓存，全量重建                        | `CACHE`                   |
+
+`TARGET=chromium` 时基座不重跑，直接消费 registry 里已有的同名标签（适合 Chromium 断言失败后重跑）；但基座标签必须已存在，否则构建在解析阶段就失败，不会退回官方 alpine。
 
 ### 顺序与串行
 
 - **顺序**：`stage: alpine` → `stage: chromium`，且 `build-chromium` 有 `needs: build-alpine`。`optional: true` 保证「只跑 chromium」时上游 job 不存在也不会报配置错误；`artifacts: false` 防止把 alpine 的 `annotation.json` 当成自己的产物上传（两个 job 写的是同一个文件名）。
 - **不需要错峰 1 小时**：GitHub 侧两条独立 cron 只能靠时间差保证基座先就绪；GitLab 一条 schedule 天然把依赖表达成 `needs`。
 - **串行**：两个 job 共用 `resource_group: alpine-image-build`，对应 GitHub 的 `concurrency.group`；`default.interruptible: false` 对应 `cancel-in-progress: false`——推 manifest 的 job 被打断会留下半套标签。跨流水线、定时与手动都进同一条队列。
-- 镜像名不含 ref：从不同分支手动触发仍会覆盖同一批标签，试推请在项目级 CI/CD 变量里覆盖 `IMAGE`（chromium job 的值必须以 `/chromium` 结尾），不要把 `BUILD_TARGET=both` 和自定义 `IMAGE` 混用。
+- 镜像名不含 ref：从不同分支手动触发仍会覆盖同一批标签，试推请在项目级 CI/CD 变量里覆盖 `IMAGE`（chromium job 的值必须以 `/chromium` 结尾），不要把 `TARGET` 和自定义 `IMAGE` 混用。
 
 ## 构建现场
 
@@ -93,10 +116,10 @@ docker run --rm registry.gitlab.com/dtapps/alpine/chromium:latest chromium --ver
 | `REGISTRY_USER`           | `CI_REGISTRY_USER`                                             | `docker login` 用户名；可覆盖                            |
 | `REVISION`                | `CI_COMMIT_SHA`                                                | OCI `revision` 标签；可覆盖                              |
 | `IMAGE_SOURCE`            | `CI_PROJECT_URL`                                               | OCI `source` / `url`；可覆盖                             |
-| `version`                 | Run pipeline 表单                                              | Alpine 版本；chromium 用它定位 registry 里的同名基座标签 |
-| `expected_chromium_major` | Run pipeline 表单                                              | Chromium 主版本断言（仅 chromium）                       |
+| `VERSION`                 | Run pipeline 表单                                              | Alpine 版本；chromium 用它定位 registry 里的同名基座标签 |
+| `EXPECTED_CHROMIUM_MAJOR` | Run pipeline 表单                                              | Chromium 主版本断言（仅 chromium）                       |
 | `CACHE`                   | 根 `variables`，默认 `on`                                      | `off` = `--no-cache` 全量重建                            |
-| `BUILD_TARGET`            | 根 `variables`，默认 `both`                                    | `both` / `alpine` / `chromium`，控制哪些 job 进流水线    |
+| `TARGET`                  | 根 `variables`，默认留空                                       | 留空 / `alpine` / `chromium`，控制哪些 job 进流水线      |
 | `QEMU_BINFMT_IMAGE`       | 根 `variables`，默认 `tonistiigi/binfmt:latest`                | binfmt 注册用的镜像                                      |
 | `GITLAB_DOTENV`           | 选填，默认 `.gitlab/build.env`                                 | 结果变量落盘位置（`artifacts:reports:dotenv`）           |
 
@@ -104,19 +127,19 @@ docker run --rm registry.gitlab.com/dtapps/alpine/chromium:latest chromium --ver
 
 ## 与 GitHub 的实现差异
 
-| 维度     | GitHub Actions                                      | GitLab CI                                                      |
-|----------|-----------------------------------------------------|----------------------------------------------------------------|
-| 地址来源 | `ghcr.io` + `GITHUB_REPOSITORY`（小写）             | `CI_REGISTRY_IMAGE`（小写）；chromium 加 `/chromium`           |
-| 凭证     | `secrets.GITHUB_TOKEN` + `permissions.packages`     | `CI_REGISTRY_PASSWORD`（临时 job token），无需额外配置 secret  |
-| 触发     | 两个 workflow 各一条 UTC cron + `workflow_dispatch` | 一条网页 schedule + Run pipeline，两个 job                     |
-| 先后     | 16:35 → 17:35 UTC 错开 1 小时                       | 同流水线 `stage` + `needs`，天然串行                           |
-| 并发     | `concurrency.group` + `queue: max`                  | `resource_group` + `default.interruptible: false`              |
-| 构建现场 | hosted runner，两个 setup action 现装 QEMU/buildx   | `docker:cli` + `dind`（TLS）+ binfmt 容器 + `buildx create`    |
-| arm64    | QEMU 模拟                                           | QEMU 模拟（同样要几十分钟，job 超时 2h）                       |
-| 层缓存   | `<镜像>:buildcache`，按 APK 索引指纹失效            | 同左                                                           |
-| 元数据   | Step Summary + artifact + `GITHUB_OUTPUT`           | artifact(JSON) + `artifacts:reports:dotenv`                    |
-| 磁盘     | 构建前删预装 SDK 腾 14 GiB                          | 依赖 runner 自身磁盘，不够时换大磁盘 runner                    |
-| 权限配置 | 包页面改 visibility / 组织 Packages 策略            | 项目设置开启 Container Registry；私有项目拉取需 `docker login` |
+| 维度     | GitHub Actions                                                        | GitLab CI                                                      |
+|----------|-----------------------------------------------------------------------|----------------------------------------------------------------|
+| 地址来源 | `ghcr.io` + `GITHUB_REPOSITORY`（小写）                               | `CI_REGISTRY_IMAGE`（小写）；chromium 加 `/chromium`           |
+| 凭证     | `secrets.GITHUB_TOKEN` + `permissions.packages`                       | `CI_REGISTRY_PASSWORD`（临时 job token），无需额外配置 secret  |
+| 触发     | 两个 workflow 各一条 UTC cron + `workflow_dispatch`                   | 一条网页 schedule + Run pipeline，两个 job                     |
+| 先后     | 16:05 → 17:05 UTC（= 北京时间 00:05 → 01:05，与 CNB 同刻）错开 1 小时 | 同流水线 `stage` + `needs`，天然串行                           |
+| 并发     | `concurrency.group` + `queue: max`                                    | `resource_group` + `default.interruptible: false`              |
+| 构建现场 | hosted runner，两个 setup action 现装 QEMU/buildx                     | `docker:cli` + `dind`（TLS）+ binfmt 容器 + `buildx create`    |
+| arm64    | QEMU 模拟                                                             | QEMU 模拟（同样要几十分钟，job 超时 2h）                       |
+| 层缓存   | `<镜像>:buildcache`，按 APK 索引指纹失效                              | 同左                                                           |
+| 元数据   | Step Summary + artifact + `GITHUB_OUTPUT`                             | artifact(JSON) + `artifacts:reports:dotenv`                    |
+| 磁盘     | 构建前删预装 SDK 腾 14 GiB                                            | 依赖 runner 自身磁盘，不够时换大磁盘 runner                    |
+| 权限配置 | 包页面改 visibility / 组织 Packages 策略                              | 项目设置开启 Container Registry；私有项目拉取需 `docker login` |
 
 关于 registry 缓存：与另两个平台同构，`<镜像>:buildcache` 是缓存清单、不是可拉取的镜像标签。装包层的缓存键带 APK 索引指纹，机制见[缓存实现](cache-implementation.md)。GitLab SaaS runner 在境外，直连 Alpine 官方源最快，**不换源**（CNB 侧的腾讯云替换不要复制过来）。
 
@@ -124,21 +147,13 @@ docker run --rm registry.gitlab.com/dtapps/alpine/chromium:latest chromium --ver
 
 1. 项目 **Settings → General → Visibility** 打开 Container Registry；确认 `CI_REGISTRY_IMAGE` = `registry.gitlab.com/dtapps/alpine`。
 2. 确认 runner 允许 privileged 容器（GitLab.com SaaS runner 已支持；自托管检查 `[runners.docker] privileged = true`），并有足够磁盘跑 Chromium 多架构。
-3. **CI/CD → Schedules** 新建一条：默认分支、建议 `35 18 * * *`，变量保持 `BUILD_TARGET=both`。
-4. **CI/CD → Pipelines → Run pipeline** 手动跑一次 `BUILD_TARGET=both`，确认两个 job 依次通过、registry 里出现 5 个标签 + `buildcache`。
+3. **CI/CD → Schedules** 新建一条：默认分支、cron 用 `5 0 * * *`，Cron timezone 选 `Asia/Shanghai`（即北京时间 00:05，与 CNB / GitHub 的基座构建同一时刻；若保持默认的实例时区，GitLab.com 是 UTC，需改成 `5 16 * * *`），变量保持 `TARGET` 留空。
+4. **CI/CD → Pipelines → Run pipeline** 手动跑一次（`TARGET` 留空），确认两个 job 依次通过、registry 里出现 5 个标签 + `buildcache`。
 5. 可选：`README.md` 顶部的 pipeline 徽章已按本仓库路径配好（`https://gitlab.com/dtapps/alpine/badges/main/pipeline.svg`）；默认分支不是 `main` 时把 URL 里的分支名换掉。
 
 ## 手动运行与排错
 
-```text
-CI/CD → Pipelines → Run pipeline
-  BUILD_TARGET=both（默认）       两个镜像都构建
-  BUILD_TARGET=alpine            只重建基座
-  BUILD_TARGET=chromium          只重建 Chromium（消费已有基座标签）
-  version=3.25.1                 钉版本；留空跟随上游 / 基座 latest
-  expected_chromium_major=156    Chromium 主版本断言，留空不校验，any 跳过
-  CACHE=off                      不用 registry 缓存，全量重建
-```
+手动触发的变量表单见上文[「手动：Run pipeline」](#手动run-pipeline)，这里不再重复；下面列常见失败症状。
 
 | 症状                                                                        | 常见原因                                                                    | 先看哪里                                                                 |
 |-----------------------------------------------------------------------------|-----------------------------------------------------------------------------|--------------------------------------------------------------------------|
@@ -146,9 +161,9 @@ CI/CD → Pipelines → Run pipeline
 | `unauthorized` / `denied`                                                   | 项目没开 Container Registry、job token 权限不足、镜像路径不合法             | 项目设置、脚本日志里的 `IMAGE`                                           |
 | arm64 阶段 `exec format error`                                              | binfmt 没注册成功（runner 不允许 privileged）                               | `before_script` 的 `docker run ... binfmt`                               |
 | `no space left on device`                                                   | Chromium 多架构把 dind 磁盘吃满                                             | runner 磁盘；`CACHE=off` 不解决磁盘问题                                  |
-| `找不到基座 ...`                                                            | alpine job 失败、或 `BUILD_TARGET=chromium` 但基座从没产过                  | 先跑 `BUILD_TARGET=alpine` 或 `both`                                     |
+| `找不到基座 ...`                                                            | alpine job 失败、或 `TARGET=chromium` 但基座从没产过（基座标签缺失）        | 先跑 `TARGET=alpine` 或留空跑两个                                        |
 | `latest` 没前进                                                             | 冒烟失败（时区、源行数、命令缺失、OCI 标签），提升前已退出                  | 构建日志的「冒烟测试失败」                                               |
-| chromium 构建在断言处失败                                                   | 填了 `expected_chromium_major`，但上游升了主版本                            | 用新主版本号覆盖，或填 `any`                                             |
+| chromium 构建在断言处失败                                                   | 填了 `EXPECTED_CHROMIUM_MAJOR`，但上游升了主版本                            | 用新主版本号覆盖，或填 `any`                                             |
 | `toomanyrequests`                                                           | Docker Hub 匿名限流（`alpine:latest`、binfmt 镜像）                         | 配 Docker Hub 凭证或使用依赖代理                                         |
 | `could not create a builder instance with TLS data loaded from environment` | buildx 不能从环境变量读 TLS 数据来创建 docker-container builder             | `before_script` 的 `docker context create` 一步                          |
 | `Skipping alias "docker" ... alias is already in use`                       | GitLab.com SaaS runner 已注入同名 service 别名，job 里显式写的 alias 被跳过 | 环境噪音，`docker info` 能连上就可忽略                                   |
@@ -162,7 +177,7 @@ CI/CD → Pipelines → Run pipeline
 - **三份副本要同步**：改镜像内容（`.gitlab/docker/`）或标签/冒烟/元数据（`.gitlab/scripts/`）时，必须同时改 `.cnb/` 与 `.github/` 的对应实现；只改平台胶水时各改各的。
 - **不要在 job 里重写 `before_script` / `variables.DOCKER_*`**：前者会整体替换 `.docker-build`，后者是 dind TLS 与 service 容器共用的全局配置。
 - 换 Docker CLI 版本要同时改 `.docker-build` 的 `image.name` 与 `services[0].name`，版本必须一致。
-- 定时任务的 cron 在网页里、不在仓库里：改时间后同步更新本篇与 README 的说明；GitLab 的 cron 按实例时区解析，自托管实例先确认时区。
+- 定时任务的 cron 在网页里、不在仓库里：改时间后同步更新本篇与 README 的说明。新建 schedule 时用表里的 **Cron timezone** 显式选时区（不选则按实例时区解析，GitLab.com 实例是 UTC），这样 cron 的语义稳定、不随实例时区漂移。
 - 不要把标签派生、冒烟、提升顺序拆成多个 job 或换成三行式构建 action：这些契约都在 `.gitlab/scripts/` 里，拆开等于再实现一遍。
 - 仓库里不存任何 PAT / deploy token；需要跨项目推镜像时，用项目级 CI/CD 变量（masked + protected）覆盖 `IMAGE` 与凭证，并在 PR 里说明。
 
