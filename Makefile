@@ -1,4 +1,23 @@
 
+# 环境变量优先级高于 .env：include 的赋值会覆盖环境值，先暂存一份
+ifeq ($(origin GIT_REMOTE),environment)
+    GIT_REMOTE_ENV := $(GIT_REMOTE)
+endif
+
+# 加载 .env 文件（如果存在）
+ifneq (,$(wildcard ./.env))
+    include .env
+    export
+endif
+
+ifneq ($(GIT_REMOTE_ENV),)
+    GIT_REMOTE := $(GIT_REMOTE_ENV)
+endif
+
+# 同步/推送目标远程，逗号分隔：GIT_REMOTE=origin,github,gitlab
+# 可通过 .env / 环境变量 / 命令行覆盖，未配置时默认 origin。
+GIT_REMOTE ?= origin
+export GIT_REMOTE
 
 # 格式化
 format: format-yaml format-markdown format-shell format-docker
@@ -57,37 +76,23 @@ format-docker:
 	@find .cnb .github .gitlab -type f -name "Dockerfile*" -exec dockerfmt -w -n {} + || { echo "❌ dockerfmt 格式化失败"; exit 1; }
 	@echo "[Format] Dockerfile 格式化完成（dockerfmt）。"
 
-# 拉取所有远程最新（先 CNB，后 GitHub 再 GitLab 镜像）然后推送
-sync: sync-cnb sync-github sync-gitlab push
-
-# 拉取 CNB 最新并以 fast-forward 合并（保留本地未提交改动）
-sync-cnb:
-	git fetch origin
-	git merge --ff-only origin/main
-	@echo "已同步 origin/main 最新代码，本地未提交改动已保留"
-
-# 拉取 GitHub 最新并以 fast-forward 合并（保留本地未提交改动）
-sync-github:
-	git fetch github
-	git merge --ff-only github/main
-	@echo "已同步 github/main 最新代码，本地未提交改动已保留"
-
-# 拉取 GitLab 最新并以 fast-forward 合并（保留本地未提交改动）
-sync-gitlab:
-	git fetch gitlab
-	git merge --ff-only gitlab/main
-	@echo "已同步 gitlab/main 最新代码，本地未提交改动已保留"
+# 按 GIT_REMOTE 顺序先全部拉取合并，再统一推送（保留本地未提交改动）
+.PHONY: sync
+sync:
+	@IFS=,; for r in $$GIT_REMOTE; do \
+		git fetch "$$r" && git merge --ff-only "$$r/main" || exit 1; \
+	done
+	@IFS=,; for r in $$GIT_REMOTE; do git push "$$r" HEAD || exit 1; done
+	@echo "同步完成！"
 
 # 推送到所有远程仓库
-push: 
-	git push origin HEAD
-	git push github HEAD
-	git push gitlab HEAD
+.PHONY: push
+push:
+	@IFS=,; for r in $$GIT_REMOTE; do git push "$$r" HEAD || exit 1; done
 	@echo "推送完成！"
 
 # 强制推送到所有远程仓库（忽略冲突）
+.PHONY: push-force
 push-force:
-	git push --force origin HEAD
-	git push --force github HEAD
-	git push --force gitlab HEAD
+	@IFS=,; for r in $$GIT_REMOTE; do git push --force "$$r" HEAD || exit 1; done
 	@echo "强制推送完成！"
