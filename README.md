@@ -69,7 +69,7 @@ FROM registry.gitlab.com/dtapps/alpine:latest
 │   ├── build-alpine.yml            # GitHub 平台：构建并推送 ghcr.io/<owner>/<repo>
 │   └── build-chromium.yml          # GitHub 平台：构建并推送 ghcr.io/<owner>/<repo>/chromium
 ├── annotation.json                 # CI 生成的镜像元数据（.gitignore 已排除）
-└── dependabot.yml                  # GitHub Actions 依赖更新
+└── dependabot.yml                  # GitHub Actions 与 Docker 基础镜像依赖更新
 .gitlab/
 ├── docker/                         # GitLab 侧的 Dockerfile 副本（alpine / chromium；headless 仅派生用）
 ├── scripts/                        # GitLab 侧的构建脚本副本（build-alpine.sh / build-chromium.sh）

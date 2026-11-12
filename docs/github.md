@@ -149,6 +149,7 @@ gh run download <run-id> -n alpine-annotation
 - **三份副本要同步**：改镜像内容（`.github/docker/`）或标签/冒烟/元数据（`.github/scripts/`）时，必须同时改 `.cnb/` 与 `.gitlab/` 里的对应实现。PR 里少改一侧，等于让三个 registry 推不同内容的同名标签。
 - **平台胶水各自维护**：触发器、时区、缓存后端、元数据落地、action 版本只改自己那一份，不要为了「统一」把 GitHub 侧的逻辑塞进 CNB 的 imports 体系，反之亦然。
 - workflow 里用到的 action（`actions/checkout`、`docker/setup-*` 等）版本由 [dependabot](../.github/dependabot.yml) 的 `github-actions` 生态扫描，升级后至少手动跑一次两条流水线。
+- Dockerfile 里的基础镜像标签由 dependabot 的 `docker` 生态扫描，按 `.github/docker`、`.cnb/docker`、`.gitlab/docker` 三个目录各配一条，改动 Dockerfile 目录时记得同步 dependabot 条目。
 - 不要在 GitHub workflow 里改用 `docker/build-push-action` 的三行式构建：标签派生、冒烟、提升顺序都在 `.github/scripts/` 里，换成 action 等于把同一份契约再实现一遍。
 
 ## 相关文档

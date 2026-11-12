@@ -9,3 +9,29 @@ updates:
     labels:
       - 'dependencies'
       - 'github-actions'
+
+  # Docker 基础镜像依赖（扫描 Dockerfile 里的 FROM 镜像标签）
+  # 三平台各留一份 Dockerfile 副本，所以按目录分别扫描，避免只覆盖 GitHub 侧。
+  - package-ecosystem: 'docker'
+    directory: '/.github/docker'
+    schedule:
+      interval: 'daily'
+    labels:
+      - 'dependencies'
+      - 'docker'
+
+  - package-ecosystem: 'docker'
+    directory: '/.cnb/docker'
+    schedule:
+      interval: 'daily'
+    labels:
+      - 'dependencies'
+      - 'docker'
+
+  - package-ecosystem: 'docker'
+    directory: '/.gitlab/docker'
+    schedule:
+      interval: 'daily'
+    labels:
+      - 'dependencies'
+      - 'docker'
