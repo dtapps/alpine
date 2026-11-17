@@ -15,8 +15,8 @@ build-chromium:
   stage: chromium
   # optional: true：手动只跑 chromium（TARGET=chromium）时 build-alpine
   #           根本不在流水线里，needs 不能因此把本 job 判成配置错误。
-  # artifacts: false：两个 job 都写 .gitlab/annotation.json，默认继承上一 stage
-  #           的产物会把 alpine 的元数据当成本 job 的产物上传。
+  # artifacts: false：不继承 build-alpine 的产物。本 job 只认自己写的
+  #           .gitlab/annotation-chromium.json，继承了也只是多下载一份无用文件。
   needs:
     - job: build-alpine
       artifacts: false
@@ -38,11 +38,9 @@ build-chromium:
       export expected_chromium_major="${EXPECTED_CHROMIUM_MAJOR:-}"
       . .gitlab/scripts/build-chromium.sh
       echo '--- 构建元数据 ---'
-      cat .gitlab/annotation.json
+      cat .gitlab/annotation-chromium.json
   artifacts:
     when: always
     expire_in: 30 days
     paths:
-      - .gitlab/annotation.json
-    reports:
-      dotenv: .gitlab/build.env
+      - .gitlab/annotation-chromium.json

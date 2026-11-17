@@ -1,8 +1,13 @@
 .env
 # CI 生成物：构建后写入的镜像元数据，供 cnbcool/annotations 插件读取
 .cnb/annotation.json
+.cnb/annotation-chromium.json
 # CI 生成物：GitHub Actions 构建写入的镜像元数据，供 Step Summary / artifact 读取
 .github/annotation.json
-# CI 生成物：GitLab CI 构建写入的镜像元数据与 job 变量（dotenv 报告）
+.github/annotation-chromium.json
+# CI 生成物：GitLab CI 构建写入的镜像元数据，随 job artifacts 保留
 .gitlab/annotation.json
-.gitlab/build.env
+.gitlab/annotation-chromium.json
+
+# Ai
+AGENTS.md

@@ -4,15 +4,16 @@
 
 ## 目录与职责
 
-| 路径                   | 职责                                                            |
-|------------------------|-----------------------------------------------------------------|
-| `.cnb.yml`             | `include` 列表 + `main` 上的两条定时任务                        |
-| `.cnb/workflows/`      | 一个事件一组职责：构建、扫描、评审、文档生成、知识库            |
-| `.cnb/docker/`         | CNB 侧的 Dockerfile（alpine / chromium / headless）             |
-| `.cnb/scripts/`        | CNB 侧的构建脚本（解析版本、派生标签、冒烟、写元数据）          |
-| `.cnb/web_trigger.yml` | 手动按钮、权限、输入项                                          |
-| `.cnb/annotation.json` | 构建生成的元数据（`.gitignore` 已排除），由 annotation 插件读取 |
-| `.cnb/security/`       | 代码扫描配置                                                    |
+| 路径                            | 职责                                                                   |
+|---------------------------------|------------------------------------------------------------------------|
+| `.cnb.yml`                      | `include` 列表                                                         |
+| `.cnb/workflows/`               | 一个事件一组职责：构建、扫描、评审、文档生成、知识库                   |
+| `.cnb/docker/`                  | CNB 侧的 Dockerfile（alpine / chromium / headless）                    |
+| `.cnb/scripts/`                 | CNB 侧的构建脚本（解析版本、派生标签、冒烟、写元数据）                 |
+| `.cnb/web_trigger.yml`          | 手动按钮、权限、输入项                                                 |
+| `.cnb/annotation.json`          | Alpine 基础镜像的元数据（`.gitignore` 已排除），由 annotation 插件读取 |
+| `.cnb/annotation-chromium.json` | Chromium 镜像的元数据，同上                                            |
+| `.cnb/security/`                | 代码扫描配置                                                           |
 
 GitHub 与 GitLab 侧各有一份对应的副本（`.github/`、`.gitlab/`），三边不互相引用，见文末「三份副本的同步」。
 
@@ -43,13 +44,13 @@ IMAGE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}/chromium" # Chromium �
 |-------------------------------------|---------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
 | `web_trigger_build_alpine`          | `.cnb/workflows/build-alpine.yml`                                   | 解析基座版本 → 一次多架构 `buildx build --push` → 派生单平台标签 → 冒烟 → 提升 `latest` / `<minor>`                                   |
 | `web_trigger_build_chromium`        | `.cnb/workflows/build-chromium.yml`                                 | 选本仓库基座标签并解析实际版本与 digest → 一次多架构构建 → 单平台标签 → 冒烟 + OCI 校验 → 提升 minor / latest，推到 `<repo>/chromium` |
-| `'crontab: 5 0 * * *'`              | `.cnb.yml` 的 `main`                                                | 同 Alpine 手动构建；定时任务不传 `version`，走 Dockerfile 默认的 `alpine:latest`                                                      |
-| `'crontab: 5 1 * * *'`              | `.cnb.yml` 的 `main`                                                | 同 Chromium 手动构建；排在 `00:05` 基座之后 1 小时，取当天基座 `latest`                                                               |
+| `'crontab: 5 0 * * *'`              | `.cnb/workflows/build-alpine.yml` 的 `main`                         | 同 Alpine 手动构建；定时任务不传 `version`，走 Dockerfile 默认的 `alpine:latest`                                                      |
+| `'crontab: 5 1 * * *'`              | `.cnb/workflows/build-chromium.yml` 的 `main`                       | 同 Chromium 手动构建；排在 `00:05` 基座之后 1 小时，取当天基座 `latest`                                                               |
 | `push`                              | `.cnb/workflows/{sca,knowledge-base}.yml`                           | SCA 报告、知识库索引                                                                                                                  |
 | `pull_request`                      | `.cnb/workflows/{code-review,cnb-sechook,code-security-config}.yml` | PR 评论、扫描与敏感信息统计、配置校验                                                                                                 |
 | `tag_push` / `web_trigger_codewiki` | `.cnb/workflows/codewiki.yml`                                       | Code Wiki                                                                                                                             |
 
-定时任务只在 `main` 顶层键下声明，所以只对默认分支生效；时间按 `Asia/Shanghai` 解释（`.cnb.yml` 里直接写北京时间）。
+定时任务只在 `main` 顶层键下声明，所以只对默认分支生效；时间按 `Asia/Shanghai` 解释（cron 表达式里直接写北京时间）。定时任务与手动按钮写在同一份 `build-*.yml` 里，用单文件 YAML 锚点复用同一份 job 定义（CNB 的锚点不能跨 `include` 文件）。
 
 ## 按钮、权限与输入
 
@@ -71,7 +72,7 @@ IMAGE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}/chromium" # Chromium �
 
 ## 元数据与徽章
 
-构建脚本把本次产物的 digest、版本、体积写到 `.cnb/annotation.json`，`cnbcool/annotations` 插件以 `type: ADD` + `fromJsonFile` 写进 commit annotation，README 徽章从 `/-/badge/annotation/commit/latest/{key}` 读取。键分两组：Alpine 用 `image_*`，Chromium 用 `chromium_*` 前缀，避免同一个 commit 上互相覆盖。
+构建脚本把本次产物的 digest、版本、体积写到元数据文件，`cnbcool/annotations` 插件以 `type: ADD` + `fromJsonFile` 写进 commit annotation，README 徽章从 `/-/badge/annotation/commit/latest/{key}` 读取。Alpine 写 `.cnb/annotation.json`、Chromium 写 `.cnb/annotation-chromium.json`（文件名与 GitHub / GitLab 侧一致，两个镜像各写各的，互不覆盖）。键分两组：Alpine 用 `image_*`，Chromium 用 `chromium_*` 前缀，避免同一个 commit 上互相覆盖。
 
 ## 与 GitHub 侧的差异
 
@@ -102,7 +103,7 @@ IMAGE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}/chromium" # Chromium �
 | 冒烟失败、`latest` 没更新          | 基座版本前缀、时区、源行数、命令缺失、OCI 标签不符                          | 冒烟步骤的断言输出                                   |
 | Chromium 报「找不到基座」          | 基座标签不存在，或 `version` 指向尚未构建的版本                             | 先跑 Alpine 流水线，确认 `<repo>:<alpine 版本>` 存在 |
 | 徽章显示 `unknown`                 | 元数据解析失败（体积记 `-1`）或 digest 未取到                               | 日志里的「体积解析失败」行                           |
-| 定时任务不生效                     | 定时任务只在 `main` 顶层键下声明，或仓库 60 天无活动被平台停用              | `.cnb.yml`、平台设置                                 |
+| 定时任务不生效                     | 定时任务只在 `main` 顶层键下声明，或仓库 60 天无活动被平台停用              | `.cnb/workflows/build-*.yml`、平台设置               |
 
 ## 相关文档
 

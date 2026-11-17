@@ -10,8 +10,8 @@
          │                        │                      │                    │
          ▼                        ▼                      ▼                    ▼
 流水线层（.cnb.yml include）
-  build-alpine.yml          .cnb.yml main          codewiki.yml       sca.yml / code-review.yml
-                                                                     knowledge-base.yml / ...
+  build-alpine.yml          build-alpine.yml main      codewiki.yml       sca.yml / code-review.yml
+  （web_trigger 事件）      （crontab 定时事件）                        knowledge-base.yml / ...
          │
          ▼
 构建层（build-alpine.sh，被 source 执行）
@@ -47,7 +47,7 @@
 | 事件                           | 来源                  | 做什么                                                   | 配置                                                                        |
 |--------------------------------|-----------------------|----------------------------------------------------------|-----------------------------------------------------------------------------|
 | `web_trigger_build_alpine`     | 页面按钮              | 一次多架构构建、派生单平台标签、冒烟后提升、写元数据     | `web_trigger.yml` → `build-alpine.yml`                                      |
-| `crontab: 5 0 * * *`           | 定时（Asia/Shanghai） | 同上；不传 `version`，跟随 `alpine:latest`（每天跟上游） | `.cnb.yml` 的 `main`                                                        |
+| `crontab: 5 0 * * *`           | 定时（Asia/Shanghai） | 同上；不传 `version`，跟随 `alpine:latest`（每天跟上游） | `build-alpine.yml` 的 `main`                                                |
 | `tag_push`                     | `git push --tags`     | 生成 Code Wiki 并入库知识库                              | `codewiki.yml`                                                              |
 | `web_trigger_codewiki`         | 页面按钮              | 同 Code Wiki，手动入口                                   | `web_trigger.yml` → `codewiki.yml`                                          |
 | `push`                         | 分支推送              | SCA 全量扫描、知识库构建                                 | `sca.yml`、`knowledge-base.yml`                                             |

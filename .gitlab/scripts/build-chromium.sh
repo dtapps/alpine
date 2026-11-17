@@ -9,8 +9,8 @@
 #     + /chromium，REGISTRY_USER ← CI_REGISTRY_USER，REVISION ← CI_COMMIT_SHA，
 #     IMAGE_SOURCE ← CI_PROJECT_URL），不读 CNB_* / GITHUB_* 变量；
 #   · 层缓存用 registry 缓存（type=registry，<镜像>:buildcache），与另两份同构；
-#   · 元数据写 .gitlab/annotation.json（job artifact），结果变量写 dotenv 报告，
-#     对应 GitHub 侧的 Step Summary + GITHUB_OUTPUT。
+#   · 元数据写 .gitlab/annotation-chromium.json（job artifact），对应 GitHub 侧的
+#     Step Summary + GITHUB_OUTPUT。
 #
 # 产物路径：<IMAGE>，默认 CI_REGISTRY_IMAGE + /chromium；显式传 IMAGE 可覆盖
 # （fork、本地复跑、试推）。
@@ -21,7 +21,7 @@
 # 设计约束（改之前先读，六条互相牵制）：
 #   1. 镜像必须挂在 <repo>/chromium 这个子路径下：同一命名空间下还有 Alpine
 #      基础镜像（<repo>），chromium 若推到 <repo> 会把它的 latest 顶掉。
-#   2. 必须 source（用 `.`）执行：dotenv 与 export 只在当前 shell 生效。
+#   2. 必须 source（用 `.`）执行：export 与 trap 只在当前 shell 生效。
 #   3. 基座是本仓库构建的 Alpine 基础镜像：按 version 选 <repo>:latest /
 #      :3.25 / :3.25.1，进容器读 /etc/alpine-release 得到实际版本，再钉住
 #      <repo>:<实际版本> 的 digest。找不到就失败，不会退回官方 alpine。
@@ -43,9 +43,7 @@ DOCKERFILE=".gitlab/docker/Dockerfile.chromium"
 PLATFORMS="linux/amd64,linux/arm64"
 MIN_IMAGE_BYTES=1048576
 EPOCH_DATE="1970-01-01T00:00:00Z"
-ANNOTATION_FILE=".gitlab/annotation.json"
-# 结果变量：artifacts:reports:dotenv 收集（等价于 GitHub 侧的 GITHUB_OUTPUT）
-DOTENV_FILE="${GITLAB_DOTENV:-.gitlab/build.env}"
+ANNOTATION_FILE=".gitlab/annotation-chromium.json"
 # registry 缓存：每个镜像用自己的 <镜像>:buildcache，不和上游/下游共用
 CACHE_REF_SUFFIX="buildcache"
 CACHE_MODE="min"
@@ -61,22 +59,16 @@ die() {
   exit 1
 }
 
-# ---------- digest / dotenv 助手 ----------
+# ---------- digest 助手 ----------
 # 不要用 --format '{{.Manifest.Digest}}'：buildx <= v0.29.x 的 imagetools
 # inspect 对任何以 "{{.Manifest" 开头的模板都会退化成人类可读的整段输出
 # （Name / MediaType / Digest / Manifests…）。那种多行结果拿去拼引用、比较
-# 和写 dotenv 都会坏：dotenv 多行会被 GitLab 判成 400 Invalid Format。
-# 换一个不以 .Manifest 开头的模板，才会走真正的 Go template 分支。
+# 都会坏。换一个不以 .Manifest 开头的模板，才会走真正的 Go template 分支。
 image_digest() ( # $1=镜像引用
   docker buildx imagetools inspect "$1" \
     --format '{{with .Manifest}}{{.Digest}}{{end}}' 2>/dev/null \
     | tr -d '[:space:]' || true
 )
-
-# dotenv 只接受单行 KEY=VALUE；任何意外换行都会让整份报告上传失败。
-dotenv_value() {
-  printf '%s' "${1:-}" | tr -d '\r\n'
-}
 
 # ---------- CACHE 开关 ----------
 # on（默认）：读写 <镜像>:buildcache；off：--no-cache 全量重建。
@@ -514,13 +506,6 @@ cat >"${ANNOTATION_FILE}" <<EOF
   "revision": "${BUILD_REVISION}"
 }
 EOF
-
-# 结果变量交给 GitLab 的 artifacts:reports:dotenv（等价于 GITHUB_OUTPUT）
-{
-  printf 'chromium_image_version=%s\n' "$(dotenv_value "${STAMP}")"
-  printf 'chromium_version=%s\n' "$(dotenv_value "${CHROMIUM_VERSION}")"
-  printf 'chromium_image_digest=%s\n' "$(dotenv_value "${DIGEST}")"
-} >"${DOTENV_FILE}"
 
 info "digest    ${DIGEST}"
 info "size      amd64 ${SIZE_AMD64} / arm64 ${SIZE_ARM64}"

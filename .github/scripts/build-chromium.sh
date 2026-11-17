@@ -9,8 +9,8 @@
 #     REGISTRY_USER ← GITHUB_ACTOR，REVISION ← GITHUB_SHA，IMAGE_SOURCE ←
 #     https://github.com/<GITHUB_REPOSITORY>），不再读 CNB_* 变量；
 #   · 层缓存用 registry 缓存（type=registry，<镜像>:buildcache），与 CNB 侧同构；
-#   · 元数据写 .github/annotation.json（供 Step Summary / artifact），不再写 CNB
-#     annotation；同时把结果写进 GITHUB_OUTPUT。
+#   · 元数据写 .github/annotation-chromium.json（供 Step Summary / artifact），
+#     不再写 CNB annotation；同时把结果写进 GITHUB_OUTPUT。
 #
 # 产物路径：<IMAGE>，默认 ghcr.io + GITHUB_REPOSITORY（转小写）+ /chromium；
 # 显式传 IMAGE 可覆盖（fork、本地复跑、试推）。
@@ -43,7 +43,7 @@ DOCKERFILE=".github/docker/Dockerfile.chromium"
 PLATFORMS="linux/amd64,linux/arm64"
 MIN_IMAGE_BYTES=1048576
 EPOCH_DATE="1970-01-01T00:00:00Z"
-ANNOTATION_FILE=".github/annotation.json"
+ANNOTATION_FILE=".github/annotation-chromium.json"
 # registry 缓存：每个镜像用自己的 <镜像>:buildcache，不和上游/下游共用
 CACHE_REF_SUFFIX="buildcache"
 CACHE_MODE="min"

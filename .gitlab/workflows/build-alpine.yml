@@ -34,7 +34,7 @@ build-alpine:
       export REGISTRY_TOKEN="$CI_REGISTRY_PASSWORD"
       # VERSION（表单）→ version（脚本）：与 GitHub 侧 inputs 语义一致。
       export version="${VERSION:-}"
-      # 必须 source（POSIX 点命令）：脚本里的 set -eu、trap、dotenv 都留在当前 shell。
+      # 必须 source（POSIX 点命令）：脚本里的 set -eu、trap、export 都留在当前 shell。
       # 用 `sh .gitlab/scripts/build-alpine.sh` 跑会静默丢掉这些副作用。
       . .gitlab/scripts/build-alpine.sh
       echo '--- 构建元数据 ---'
@@ -46,5 +46,3 @@ build-alpine:
     expire_in: 30 days
     paths:
       - .gitlab/annotation.json
-    reports:
-      dotenv: .gitlab/build.env

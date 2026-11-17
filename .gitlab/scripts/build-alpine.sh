@@ -6,7 +6,7 @@
 # 这是 .cnb/scripts/ 与 .github/scripts/ 同名脚本的 GitLab 侧副本：三个平台
 # 有意各留一份，不互相引用（CNB 侧读 CNB_* 变量、写 commit annotation；
 # GitHub 侧读 Actions 上下文、写 Step Summary；这里读 CI_* 预定义变量、
-# 写 job artifact 与 dotenv 报告）。
+# 写 job artifact）。
 # 改标签规则/冒烟断言时三份都要同步；平台胶水各改各的。
 #
 # 环境变量（默认从 GitLab CI 预定义变量派生，显式传同名变量可覆盖）：
@@ -17,7 +17,6 @@
 #   REVISION       默认 CI_COMMIT_SHA，写进 OCI revision
 #   IMAGE_SOURCE   默认 CI_PROJECT_URL，写进 OCI source/url
 #   version        选填，空/latest = 跟随 Dockerfile 的 alpine:latest
-#   GITLAB_DOTENV  选填，默认 .gitlab/build.env，写 artifacts:reports:dotenv
 #
 # 设计约束（改之前先读，五条互相牵制）：
 #   1. 只构建一次多架构，单平台标签从同一份 manifest 派生 —— 不重建，
@@ -27,7 +26,7 @@
 #      确定值，写进标签与 OCI label，标签名因此永远是可读的 alpine 版本号。
 #   3. 标签就是 alpine 版本号（不加日期）：先推 <版本>，冒烟通过后才提升 latest / minor。
 #      同名标签每天被覆盖，历史只能靠元数据里的 digest 追；冒烟失败时 latest / minor 不动。
-#   4. 必须 source（用 `.`）执行：dotenv 与 export 只在当前 shell 生效，
+#   4. 必须 source（用 `.`）执行：export 与 trap 只在当前 shell 生效，
 #      用 `sh build-alpine.sh` 跑会静默丢掉这两件事。
 #   5. registry 缓存按「上游是否真的变了」失效：装包层的缓存键里带 APK 索引
 #      指纹（apk update 后对 APKINDEX 求 sha256）。索引不变就命中；任何包升级
@@ -49,8 +48,6 @@ EPOCH_DATE="1970-01-01T00:00:00Z"
 MIN_IMAGE_BYTES=1048576
 # 构建元数据落盘位置：job 的 artifacts 收集它
 ANNOTATION_FILE=".gitlab/annotation.json"
-# 结果变量：artifacts:reports:dotenv 收集（等价于 GitHub 侧的 GITHUB_OUTPUT）
-DOTENV_FILE="${GITLAB_DOTENV:-.gitlab/build.env}"
 # registry 缓存：每个镜像用自己的 <镜像>:buildcache，不和下游/上游共用
 CACHE_REF_SUFFIX="buildcache"
 CACHE_MODE="min"
@@ -63,22 +60,16 @@ die() {
   exit 1
 }
 
-# ---------- digest / dotenv 助手 ----------
+# ---------- digest 助手 ----------
 # 不要用 --format '{{.Manifest.Digest}}'：buildx <= v0.29.x 的 imagetools
 # inspect 对任何以 "{{.Manifest" 开头的模板都会退化成人类可读的整段输出
-# （Name / MediaType / Digest / Manifests…），多行结果写进 dotenv 会被
-# GitLab 判成 400 Invalid Format，job 在镜像已推送后失败。
+# （Name / MediaType / Digest / Manifests…），多行结果没法拿去拼引用、比较。
 # 换一个不以 .Manifest 开头的模板，才会走真正的 Go template 分支。
 image_digest() ( # $1=镜像引用
   docker buildx imagetools inspect "$1" \
     --format '{{with .Manifest}}{{.Digest}}{{end}}' 2>/dev/null \
     | tr -d '[:space:]' || true
 )
-
-# dotenv 只接受单行 KEY=VALUE；任何意外换行都会让整份报告上传失败。
-dotenv_value() {
-  printf '%s' "${1:-}" | tr -d '\r\n'
-}
 
 # ---------- CACHE 开关 ----------
 # on（默认）：读写 <镜像>:buildcache；off：--no-cache 全量重建。
@@ -480,14 +471,6 @@ cat >"${ANNOTATION_FILE}" <<EOF
   "revision": "${VCS_REF}"
 }
 EOF
-
-# 结果变量交给 GitLab 的 artifacts:reports:dotenv；文件在 job 的
-# before_script 里就建好了，构建失败时 dotenv 报告也不会缺文件。
-{
-  printf 'image_version=%s\n' "$(dotenv_value "${STAMP}")"
-  printf 'image_digest=%s\n' "$(dotenv_value "${INDEX_DIGEST:-unknown}")"
-  printf 'alpine_version=%s\n' "$(dotenv_value "${ALPINE_REAL}")"
-} >"${DOTENV_FILE}"
 
 info "digest  ${INDEX_DIGEST:-unknown}"
 info "size    amd64 ${SIZE_AMD64} / arm64 ${SIZE_ARM64}"

@@ -13,7 +13,6 @@ Makefile
 # 工具配置与 CI 生成物
 .yamlfmt
 .scanignore
-.cnb/annotation.json
-.github/annotation.json
-.gitlab/annotation.json
-.gitlab/build.env
+.cnb/annotation*.json
+.github/annotation*.json
+.gitlab/annotation*.json

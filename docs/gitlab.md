@@ -6,12 +6,12 @@
 
 GitLab 侧不 `source` 另两个平台的脚本，也不共用 Dockerfile。三个平台各有一份完整实现：
 
-| 职责       | CNB                                               | GitHub                                              | GitLab                                             |
-|------------|---------------------------------------------------|-----------------------------------------------------|----------------------------------------------------|
-| Dockerfile | `.cnb/docker/`                                    | `.github/docker/`                                   | `.gitlab/docker/`                                  |
-| 构建脚本   | `.cnb/scripts/build-*.sh`                         | `.github/scripts/build-*.sh`                        | `.gitlab/scripts/build-*.sh`                       |
-| 流水线     | `.cnb.yml` + `.cnb/workflows/`                    | `.github/workflows/`                                | `.gitlab-ci.yml` + `.gitlab/workflows/`            |
-| 元数据     | `.cnb/annotation.json` → commit annotation → 徽章 | `.github/annotation.json` → Step Summary + artifact | `.gitlab/annotation.json` → artifact + dotenv 报告 |
+| 职责       | CNB                                               | GitHub                                              | GitLab                                  |
+|------------|---------------------------------------------------|-----------------------------------------------------|-----------------------------------------|
+| Dockerfile | `.cnb/docker/`                                    | `.github/docker/`                                   | `.gitlab/docker/`                       |
+| 构建脚本   | `.cnb/scripts/build-*.sh`                         | `.github/scripts/build-*.sh`                        | `.gitlab/scripts/build-*.sh`            |
+| 流水线     | `.cnb.yml` + `.cnb/workflows/`                    | `.github/workflows/`                                | `.gitlab-ci.yml` + `.gitlab/workflows/` |
+| 元数据     | `.cnb/annotation.json` → commit annotation → 徽章 | `.github/annotation.json` → Step Summary + artifact | `.gitlab/annotation.json` → artifact    |
 
 复制而不是共用的原因与 GitHub 侧相同：标签规则、冒烟断言是同构的，但**平台胶水不同**——GitLab 读 `CI_*` 预定义变量、用临时 job token 登录、在 dind 里自建 buildx builder、把元数据交给 job artifact。代价只有一条，且是硬性规则：**改镜像内容、标签规则、冒烟断言时三份都要改**（见 [CONTRIBUTING](../CONTRIBUTING.md) 硬性规则）；改平台胶水只改自己那一份。
 
@@ -80,7 +80,7 @@ GitLab 的 cron 不在 YAML 里，定时任务要建在 **CI/CD → Schedules**�
 
 ### 顺序与串行
 
-- **顺序**：`stage: alpine` → `stage: chromium`，且 `build-chromium` 有 `needs: build-alpine`。`optional: true` 保证「只跑 chromium」时上游 job 不存在也不会报配置错误；`artifacts: false` 防止把 alpine 的 `annotation.json` 当成自己的产物上传（两个 job 写的是同一个文件名）。
+- **顺序**：`stage: alpine` → `stage: chromium`，且 `build-chromium` 有 `needs: build-alpine`。`optional: true` 保证「只跑 chromium」时上游 job 不存在也不会报配置错误；`artifacts: false` 表示不继承 build-alpine 的产物（本 job 只认自己写的 `annotation-chromium.json`，继承下来也只是多下载一份无用文件）。
 - **不需要错峰 1 小时**：GitHub 侧两条独立 cron 只能靠时间差保证基座先就绪；GitLab 一条 schedule 天然把依赖表达成 `needs`。
 - **串行**：两个 job 共用 `resource_group: alpine-image-build`，对应 GitHub 的 `concurrency.group`；`default.interruptible: false` 对应 `cancel-in-progress: false`——推 manifest 的 job 被打断会留下半套标签。跨流水线、定时与手动都进同一条队列。
 - 镜像名不含 ref：从不同分支手动触发仍会覆盖同一批标签，试推请在项目级 CI/CD 变量里覆盖 `IMAGE`（chromium job 的值必须以 `/chromium` 结尾），不要把 `TARGET` 和自定义 `IMAGE` 混用。
@@ -89,12 +89,11 @@ GitLab 的 cron 不在 YAML 里，定时任务要建在 **CI/CD → Schedules**�
 
 两个 job 都 `extends: .docker-build`（定义在根 `.gitlab-ci.yml`），公共 `before_script` 依次做：
 
-1. 预建空的 `.gitlab/build.env`（放在第一步，后面任何一步失败时 dotenv 报告也不缺文件）；
-2. `apk add --no-cache git jq`、`git config --global --add safe.directory "$CI_PROJECT_DIR"`（`BUILD_DATE` 取 `git log -1 --format=%cI`）；
-3. 等 dind 服务就绪（`docker info` 重试 30 次）；
-4. `docker run --rm --privileged "$QEMU_BINFMT_IMAGE" --install arm64` 注册 binfmt，等价于 GitHub 侧 `setup-qemu-action`；缺了会在 arm64 的 `apk add` 报 `exec format error`。GitLab.com SaaS runner 的宿主内核通常已注册 QEMU，输出 `qemu-aarch64 already registered` 属正常；
-5. `docker context create alpine-builder-context --docker "host=...,ca=...,cert=...,key=..."`：把 dind 的 endpoint 与 TLS 证书固化进一个 docker context；
-6. `docker buildx create --name alpine-builder --driver docker-container --bootstrap --use alpine-builder-context` + `docker buildx inspect --bootstrap`：只有 docker-container driver 能一次产出多架构 manifest list 并 `--push`。
+1. `apk add --no-cache git jq`、`git config --global --add safe.directory "$CI_PROJECT_DIR"`（`BUILD_DATE` 取 `git log -1 --format=%cI`）；
+2. 等 dind 服务就绪（`docker info` 重试 30 次）；
+3. `docker run --rm --privileged "$QEMU_BINFMT_IMAGE" --install arm64` 注册 binfmt，等价于 GitHub 侧 `setup-qemu-action`；缺了会在 arm64 的 `apk add` 报 `exec format error`。GitLab.com SaaS runner 的宿主内核通常已注册 QEMU，输出 `qemu-aarch64 already registered` 属正常；
+4. `docker context create alpine-builder-context --docker "host=...,ca=...,cert=...,key=..."`：把 dind 的 endpoint 与 TLS 证书固化进一个 docker context；
+5. `docker buildx create --name alpine-builder --driver docker-container --bootstrap --use alpine-builder-context` + `docker buildx inspect --bootstrap`：只有 docker-container driver 能一次产出多架构 manifest list 并 `--push`。
 
 `docker:28-cli` + `docker:28-dind` 走 TLS（`DOCKER_TLS_CERTDIR=/certs`），这几个 `DOCKER_*` 变量必须写在**全局** `variables` 里，service 容器也要读到，runner 据此在 job 与 dind 之间共享 `/certs` 卷。
 
@@ -121,9 +120,10 @@ GitLab 的 cron 不在 YAML 里，定时任务要建在 **CI/CD → Schedules**�
 | `CACHE`                   | 根 `variables`，默认 `on`                                      | `off` = `--no-cache` 全量重建                            |
 | `TARGET`                  | 根 `variables`，默认留空                                       | 留空 / `alpine` / `chromium`，控制哪些 job 进流水线      |
 | `QEMU_BINFMT_IMAGE`       | 根 `variables`，默认 `tonistiigi/binfmt:latest`                | binfmt 注册用的镜像                                      |
-| `GITLAB_DOTENV`           | 选填，默认 `.gitlab/build.env`                                 | 结果变量落盘位置（`artifacts:reports:dotenv`）           |
 
-产物：`.gitlab/annotation.json`（artifact，留 30 天）记录 digest、体积、版本、APK 索引指纹等；`.gitlab/build.env`（dotenv 报告）写 `image_version` / `image_digest` / `alpine_version`（chromium 是 `chromium_image_version` / `chromium_version` / `chromium_image_digest`）。两个文件都在 `.gitignore` 里，也都在 `.dockerignore` 里排除，不会进镜像构建上下文。
+产物：`.gitlab/annotation.json`（Alpine 基础镜像）与 `.gitlab/annotation-chromium.json`（Chromium 镜像），各自作为 job artifact 留 30 天，记录 digest、体积、版本、APK 索引指纹等。两个文件都在 `.gitignore` 里，也都在 `.dockerignore` 里排除，不会进镜像构建上下文。
+
+不产出 dotenv 报告（`artifacts:reports:dotenv`）：本仓库没有消费这些变量的下游 job——`build-chromium` 直接从 registry 解析基座标签，不读上游 job 的输出变量；而 dotenv 只接受单行 `KEY=VALUE`，一旦某个值里混入换行，GitLab 会在镜像已经推送之后把 job 判成失败（`400 Invalid Format`）。元数据 JSON 已经承担了留档职责。
 
 ## 与 GitHub 的实现差异
 
@@ -137,7 +137,7 @@ GitLab 的 cron 不在 YAML 里，定时任务要建在 **CI/CD → Schedules**�
 | 构建现场 | hosted runner，两个 setup action 现装 QEMU/buildx                     | `docker:cli` + `dind`（TLS）+ binfmt 容器 + `buildx create`    |
 | arm64    | QEMU 模拟                                                             | QEMU 模拟（同样要几十分钟，job 超时 2h）                       |
 | 层缓存   | `<镜像>:buildcache`，按 APK 索引指纹失效                              | 同左                                                           |
-| 元数据   | Step Summary + artifact + `GITHUB_OUTPUT`                             | artifact(JSON) + `artifacts:reports:dotenv`                    |
+| 元数据   | Step Summary + artifact + `GITHUB_OUTPUT`                             | artifact(JSON)                                                 |
 | 磁盘     | 构建前删预装 SDK 腾 14 GiB                                            | 依赖 runner 自身磁盘，不够时换大磁盘 runner                    |
 | 权限配置 | 包页面改 visibility / 组织 Packages 策略                              | 项目设置开启 Container Registry；私有项目拉取需 `docker login` |
 
@@ -155,22 +155,20 @@ GitLab 的 cron 不在 YAML 里，定时任务要建在 **CI/CD → Schedules**�
 
 手动触发的变量表单见上文[「手动：Run pipeline」](#手动run-pipeline)，这里不再重复；下面列常见失败症状。
 
-| 症状                                                                        | 常见原因                                                                    | 先看哪里                                                                 |
-|-----------------------------------------------------------------------------|-----------------------------------------------------------------------------|--------------------------------------------------------------------------|
-| 流水线根本没创建                                                            | 不是 `schedule` / `web`，或 schedule 不在默认分支                           | `workflow:rules`、`CI_PIPELINE_SOURCE`                                   |
-| `unauthorized` / `denied`                                                   | 项目没开 Container Registry、job token 权限不足、镜像路径不合法             | 项目设置、脚本日志里的 `IMAGE`                                           |
-| arm64 阶段 `exec format error`                                              | binfmt 没注册成功（runner 不允许 privileged）                               | `before_script` 的 `docker run ... binfmt`                               |
-| `no space left on device`                                                   | Chromium 多架构把 dind 磁盘吃满                                             | runner 磁盘；`CACHE=off` 不解决磁盘问题                                  |
-| `找不到基座 ...`                                                            | alpine job 失败、或 `TARGET=chromium` 但基座从没产过（基座标签缺失）        | 先跑 `TARGET=alpine` 或留空跑两个                                        |
-| `latest` 没前进                                                             | 冒烟失败（时区、源行数、命令缺失、OCI 标签），提升前已退出                  | 构建日志的「冒烟测试失败」                                               |
-| chromium 构建在断言处失败                                                   | 填了 `EXPECTED_CHROMIUM_MAJOR`，但上游升了主版本                            | 用新主版本号覆盖，或填 `any`                                             |
-| `toomanyrequests`                                                           | Docker Hub 匿名限流（`alpine:latest`、binfmt 镜像）                         | 配 Docker Hub 凭证或使用依赖代理                                         |
-| `could not create a builder instance with TLS data loaded from environment` | buildx 不能从环境变量读 TLS 数据来创建 docker-container builder             | `before_script` 的 `docker context create` 一步                          |
-| `Skipping alias "docker" ... alias is already in use`                       | GitLab.com SaaS runner 已注入同名 service 别名，job 里显式写的 alias 被跳过 | 环境噪音，`docker info` 能连上就可忽略                                   |
-| `.gitlab/annotation.json: no matching files`                                | 构建在写元数据之前就失败，文件尚未生成                                      | 预期警告，先看真正的失败步骤                                             |
-| `build.env` dotenv 报告缺文件                                               | `before_script` 完全没跑起来（镜像没拉到等）                                | 只是警告，不影响 job 结果                                                |
-| dotenv 上传 `400 Bad Request (Invalid Format)`，job 在推送成功后失败        | `build.env` 的值里有换行（如把 `imagetools inspect` 的整段输出当 digest）   | 脚本的 `image_digest()` 已单行化；勿用 `--format '{{.Manifest.Digest}}'` |
-| registry 里出现 `buildcache`                                                | 预期行为：registry 缓存清单，不是镜像标签                                   | 无需处理；不想用可传 `CACHE=off`                                         |
+| 症状                                                                        | 常见原因                                                                    | 先看哪里                                        |
+|-----------------------------------------------------------------------------|-----------------------------------------------------------------------------|-------------------------------------------------|
+| 流水线根本没创建                                                            | 不是 `schedule` / `web`，或 schedule 不在默认分支                           | `workflow:rules`、`CI_PIPELINE_SOURCE`          |
+| `unauthorized` / `denied`                                                   | 项目没开 Container Registry、job token 权限不足、镜像路径不合法             | 项目设置、脚本日志里的 `IMAGE`                  |
+| arm64 阶段 `exec format error`                                              | binfmt 没注册成功（runner 不允许 privileged）                               | `before_script` 的 `docker run ... binfmt`      |
+| `no space left on device`                                                   | Chromium 多架构把 dind 磁盘吃满                                             | runner 磁盘；`CACHE=off` 不解决磁盘问题         |
+| `找不到基座 ...`                                                            | alpine job 失败、或 `TARGET=chromium` 但基座从没产过（基座标签缺失）        | 先跑 `TARGET=alpine` 或留空跑两个               |
+| `latest` 没前进                                                             | 冒烟失败（时区、源行数、命令缺失、OCI 标签），提升前已退出                  | 构建日志的「冒烟测试失败」                      |
+| chromium 构建在断言处失败                                                   | 填了 `EXPECTED_CHROMIUM_MAJOR`，但上游升了主版本                            | 用新主版本号覆盖，或填 `any`                    |
+| `toomanyrequests`                                                           | Docker Hub 匿名限流（`alpine:latest`、binfmt 镜像）                         | 配 Docker Hub 凭证或使用依赖代理                |
+| `could not create a builder instance with TLS data loaded from environment` | buildx 不能从环境变量读 TLS 数据来创建 docker-container builder             | `before_script` 的 `docker context create` 一步 |
+| `Skipping alias "docker" ... alias is already in use`                       | GitLab.com SaaS runner 已注入同名 service 别名，job 里显式写的 alias 被跳过 | 环境噪音，`docker info` 能连上就可忽略          |
+| `.gitlab/annotation.json: no matching files`                                | 构建在写元数据之前就失败，文件尚未生成                                      | 预期警告，先看真正的失败步骤                    |
+| registry 里出现 `buildcache`                                                | 预期行为：registry 缓存清单，不是镜像标签                                   | 无需处理；不想用可传 `CACHE=off`                |
 
 ## 维护约定
 

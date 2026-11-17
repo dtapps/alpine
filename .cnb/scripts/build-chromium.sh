@@ -526,8 +526,10 @@ BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 # 提示：本仓库同时发布 Alpine 基础镜像，它的元数据用 image_* 无前缀键，
 # 这里必须全部加 chromium_ 前缀，否则同一个 commit 上两组键互相覆盖。
+# 文件名也分开（annotation-chromium.json vs annotation.json）：CNB 的两个 job
+# 跑在同一份工作区里时，先跑的那个写的文件会被后跑的覆盖。
 mkdir -p .cnb
-cat >.cnb/annotation.json <<EOF
+cat >.cnb/annotation-chromium.json <<EOF
 {
   "chromium_image_ref": "${IMAGE}",
   "chromium_image_version": "${STAMP}",
@@ -551,7 +553,7 @@ printf '##[set-output chromium_image_digest=%s]\n' "${DIGEST}"
 info "digest    ${DIGEST}"
 info "size      amd64 ${SIZE_AMD64} / arm64 ${SIZE_ARM64}"
 info "chromium  ${CHROMIUM_VERSION}"
-info "元数据    .cnb/annotation.json"
+info "元数据    .cnb/annotation-chromium.json"
 
 echo "=============================="
 echo "🎉 Chromium 镜像构建完成 ${IMAGE}:${STAMP}"

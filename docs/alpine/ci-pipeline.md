@@ -4,7 +4,9 @@
 
 ## 为什么拆成 include
 
-一条流水线要同时承载构建、扫描、评审、文档生成、知识库同步五类互不相关的事情。全塞进 `.cnb.yml` 会得到一份几百行、谁都不敢动的文件，所以按「一个事件一组职责」拆成 7 个文件，`.cnb.yml` 只保留两件事：`include` 列表和 `main` 上的定时任务。改 SCA 阈值不会碰到构建脚本，改构建不会误删评审配置。
+一条流水线要同时承载构建、扫描、评审、文档生成、知识库同步五类互不相关的事情。全塞进 `.cnb.yml` 会得到一份几百行、谁都不敢动的文件，所以按「一个事件一组职责」拆成 7 个文件，`.cnb.yml` 只保留 `include` 列表。改 SCA 阈值不会碰到构建脚本，改构建不会误删评审配置。
+
+定时任务不写在 `.cnb.yml`，而是与手动按钮一起放在 `.cnb/workflows/build-alpine.yml` 里，用单文件 YAML 锚点复用同一份 job 定义（CNB 的锚点不能跨 `include` 文件）。
 
 代价是触发关系不再集中在一处：某个事件到底跑哪些步骤，需要跨文件看。下表就是用来补这个信息。
 
@@ -26,7 +28,7 @@ main:
 
 两层键决定「什么时候跑」：
 
-- 顶层键是分支过滤器。`.cnb.yml` 里定时任务挂在 `main` 下，只对默认分支生效；7 个 workflow 文件统一用 `'**'`，对所有分支生效。
+- 顶层键是分支过滤器。定时任务挂在 `main` 下，只对默认分支生效；7 个 workflow 文件的其它事件统一用 `'**'`，对所有分支生效。
 - 事件名在过滤器下一层，值是流水线数组。`push`、`pull_request`、`tag_push`、`issue.open`、`web_trigger_build_alpine` 都是同级事件键；定时事件把 cron 表达式写进键名并加引号（`'crontab: 5 0 * * *'`），因为键值里有空格和 `*`。
 
 ## 事件与 workflow 对应表
@@ -34,7 +36,7 @@ main:
 | 事件                           | 定义位置                                                                   | 产物                                                                                                                           |
 |--------------------------------|----------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
 | `web_trigger_build_alpine`     | `workflows/build-alpine.yml`                                               | 解析基座版本 → 一次 `buildx build --push` 推版本标签 → 派生单平台标签 → 冒烟 → 提升 `latest`/`<minor>`；`.cnb/annotation.json` |
-| `'crontab: 5 0 * * *'`         | `.cnb.yml` 的 `main`                                                       | 同上；定时任务没有按钮输入，`version` 传不了，走 `Dockerfile` 默认的 `alpine:latest`（每天跟上游），标签用解析出的实际版本     |
+| `'crontab: 5 0 * * *'`         | `workflows/build-alpine.yml` 的 `main`                                     | 同上；定时任务没有按钮输入，`version` 传不了，走 `Dockerfile` 默认的 `alpine:latest`（每天跟上游），标签用解析出的实际版本     |
 | `tag_push`                     | `workflows/codewiki.yml`                                                   | `${CNB_BUILD_WORKSPACE}/${CNB_REPO_SLUG}/codewiki` 下的 Code Wiki                                                              |
 | `web_trigger_codewiki`         | `workflows/codewiki.yml`                                                   | 同上                                                                                                                           |
 | `push`                         | `workflows/sca.yml`、`workflows/knowledge-base.yml`                        | SCA 全量报告附件、知识库索引                                                                                                   |
@@ -173,17 +175,17 @@ buildx 默认会给推送的 index 追加 attestation 清单：provenance（默�
 
 ## 插件职责
 
-| 插件镜像                           | 出现位置                              | 职责与关键参数                                                                 |
-|------------------------------------|---------------------------------------|--------------------------------------------------------------------------------|
-| `cnbcool/annotations:latest`       | `build-alpine.yml`、`.cnb.yml` `main` | `type: ADD` + `fromJsonFile: .cnb/annotation.json`，写 commit 元数据           |
-| `cnbcool/codewiki:latest`          | `codewiki.yml`                        | 生成 Code Wiki，`git_doc_dir` 指定落盘目录，`timeout: 3h`                      |
-| `cnbcool/knowledge-base`           | `knowledge-base.yml`                  | `include: '**/**.md'`、`issueSyncEnabled: true`、`ignoreProcessFailures: true` |
-| `cnbcool/sca-vulnerability:latest` | `sca.yml`                             | 组件漏洞扫描，`scanMode: full/diff`、`publish: true`、`failOnSeverity: high`   |
-| `cnbcool/sca-license:latest`       | `sca.yml`                             | License 扫描，参数同上                                                         |
-| `cnbcool/sca-sbom:latest`          | `sca.yml`                             | SBOM，`format: spdx`                                                           |
-| `cnbcool/code-review:latest`       | `code-review.yml`                     | PR 上的 AI 评审，`comment`、`min_severity`、`exclude_categories`、`model` 等   |
-| `cnbcool/cnb-sechook`              | `cnb-sechook.yml`                     | 汇总扫描结果与敏感信息统计，`max_display_authors: 5`                           |
-| `cnbcool/code-security-config`     | `code-security-config.yml`            | `args: [validate]`，校验扫描配置本身合法                                       |
+| 插件镜像                           | 出现位置                   | 职责与关键参数                                                                 |
+|------------------------------------|----------------------------|--------------------------------------------------------------------------------|
+| `cnbcool/annotations:latest`       | `build-alpine.yml`         | `type: ADD` + `fromJsonFile: .cnb/annotation.json`，写 commit 元数据           |
+| `cnbcool/codewiki:latest`          | `codewiki.yml`             | 生成 Code Wiki，`git_doc_dir` 指定落盘目录，`timeout: 3h`                      |
+| `cnbcool/knowledge-base`           | `knowledge-base.yml`       | `include: '**/**.md'`、`issueSyncEnabled: true`、`ignoreProcessFailures: true` |
+| `cnbcool/sca-vulnerability:latest` | `sca.yml`                  | 组件漏洞扫描，`scanMode: full/diff`、`publish: true`、`failOnSeverity: high`   |
+| `cnbcool/sca-license:latest`       | `sca.yml`                  | License 扫描，参数同上                                                         |
+| `cnbcool/sca-sbom:latest`          | `sca.yml`                  | SBOM，`format: spdx`                                                           |
+| `cnbcool/code-review:latest`       | `code-review.yml`          | PR 上的 AI 评审，`comment`、`min_severity`、`exclude_categories`、`model` 等   |
+| `cnbcool/cnb-sechook`              | `cnb-sechook.yml`          | 汇总扫描结果与敏感信息统计，`max_display_authors: 5`                           |
+| `cnbcool/code-security-config`     | `code-security-config.yml` | `args: [validate]`，校验扫描配置本身合法                                       |
 
 插件镜像多数只有 `:latest`（`cnbcool/annotations` 目前没有版本化 tag，构建网络内也取不到它的 digest）， 所以插件升级不被本仓库控制。这是已知的供应链薄弱点，写在 [SECURITY](../../SECURITY.md) 的已知取舍里； 脚本侧的对策是「元数据 key 结构固定 + 冒烟核对 OCI 标签」，插件行为一变，下一次构建就能看出来。
 
@@ -212,16 +214,16 @@ buildx 默认会给推送的 index 追加 attestation 清单：provenance（默�
 
 ## 典型失败与排查入口
 
-| 症状                      | 常见原因                                                                                 | 先看哪里                       |
-|---------------------------|------------------------------------------------------------------------------------------|--------------------------------|
-| 点按钮没有任何流水线产生  | `web_trigger.yml` 的 `event` 与 workflow 事件键不一致，或该 workflow 不在 `include` 里   | 按钮定义、`include` 列表       |
-| 脚本报 version 非法       | 输入不是 latest / `3.25` / `3.25.1` / `3.25.1@sha256:<64hex> 之一（如 `v3.25`、`3.25/`） | 白名单校验的报错输出           |
-| 解析不到基座版本          | 一次性容器拉不到 `alpine:latest`，或 `/etc/alpine-release` 读不到                        | 第 3 段的「无法解析」报错      |
-| `FROM` 阶段拉不到基础镜像 | `version` 不是 Docker Hub 上真实存在的 alpine tag                                        | 构建步骤日志、`version` 输入值 |
-| 冒烟失败、`latest` 没更新 | 基座版本前缀不符、时区、源行数、命令缺失或 OCI 标签 `version` 不符                       | 冒烟步骤的断言输出             |
-| buildx bootstrap 失败     | 脚本里自建了 docker-container builder                                                    | 脚本的 buildx 自检段输出       |
-| 徽章显示 `unknown`        | 元数据解析失败（体积记 `-1`）或 digest 未取到                                            | 日志里的「体积解析失败」行     |
-| 定时任务不生效            | 定时任务只在 `main` 顶层键下声明，改在其它分支上不会生效                                 | `.cnb.yml`、默认分支内容       |
+| 症状                      | 常见原因                                                                                 | 先看哪里                                        |
+|---------------------------|------------------------------------------------------------------------------------------|-------------------------------------------------|
+| 点按钮没有任何流水线产生  | `web_trigger.yml` 的 `event` 与 workflow 事件键不一致，或该 workflow 不在 `include` 里   | 按钮定义、`include` 列表                        |
+| 脚本报 version 非法       | 输入不是 latest / `3.25` / `3.25.1` / `3.25.1@sha256:<64hex> 之一（如 `v3.25`、`3.25/`） | 白名单校验的报错输出                            |
+| 解析不到基座版本          | 一次性容器拉不到 `alpine:latest`，或 `/etc/alpine-release` 读不到                        | 第 3 段的「无法解析」报错                       |
+| `FROM` 阶段拉不到基础镜像 | `version` 不是 Docker Hub 上真实存在的 alpine tag                                        | 构建步骤日志、`version` 输入值                  |
+| 冒烟失败、`latest` 没更新 | 基座版本前缀不符、时区、源行数、命令缺失或 OCI 标签 `version` 不符                       | 冒烟步骤的断言输出                              |
+| buildx bootstrap 失败     | 脚本里自建了 docker-container builder                                                    | 脚本的 buildx 自检段输出                        |
+| 徽章显示 `unknown`        | 元数据解析失败（体积记 `-1`）或 digest 未取到                                            | 日志里的「体积解析失败」行                      |
+| 定时任务不生效            | 定时任务只在 `main` 顶层键下声明，改在其它分支上不会生效                                 | `.cnb/workflows/build-alpine.yml`、默认分支内容 |
 
 排查入口：
 

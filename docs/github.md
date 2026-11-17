@@ -91,7 +91,7 @@ GitHub 的 `cron` 是 UTC，不会跟随仓库时区，所以要把 CNB 的北�
 
 Dockerfile 里的 `ARG IMAGE_SOURCE=…`、`ARG CHROMIUM_BASE_IMAGE=alpine:${ALPINE_VERSION}` 同理只是**本地手动构建的兜底默认值**：CI 的 Chromium 构建会把它换成 `ghcr.io/<owner>/<repo>:<version>@sha256:…`，并额外传 `CHROMIUM_BASE_NAME` / `CHROMIUM_BASE_DIGEST` 供 OCI 基座标签使用。这三个 `CHROMIUM_BASE_*` 不经过 workflow 输入，全部由 `build-chromium.sh` 解析后注入；要手动模拟 CI，直接给 `docker buildx build` 传同名 `--build-arg` 即可。
 
-脚本产物：`GITHUB_OUTPUT` 里写 `image_version` / `image_digest`（chromium 是 `chromium_image_version` / `chromium_version` / `chromium_image_digest`），并把完整元数据写进 `.github/annotation.json`（`.gitignore` 已排除），由 workflow 的 Step Summary 与 `upload-artifact` 消费。
+脚本产物：`GITHUB_OUTPUT` 里写 `image_version` / `image_digest`（chromium 是 `chromium_image_version` / `chromium_version` / `chromium_image_digest`），并把完整元数据写进 `.github/annotation.json`（Chromium 是 `.github/annotation-chromium.json`；`.gitignore` 已排除），由 workflow 的 Step Summary 与 `upload-artifact` 消费。
 
 ## 与 CNB 的实现差异
 

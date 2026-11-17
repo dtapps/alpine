@@ -27,7 +27,7 @@
       image: cnbcool/annotations:latest
       settings:
         type: ADD
-        fromJsonFile: .cnb/annotation.json
+        fromJsonFile: .cnb/annotation-chromium.json
 
 '**':
   # 手动按钮：通过页面自定义按钮触发（web_trigger_build_chromium）。

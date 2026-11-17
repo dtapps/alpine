@@ -10,8 +10,9 @@
          │                        │                      │                    │
          ▼                        ▼                      ▼                    ▼
 流水线层（.cnb.yml include）
-  build-chromium.yml       .cnb.yml main          codewiki.yml       sca.yml / code-review.yml
-                           （build-alpine.yml 每天 00:05 先产出基座）   knowledge-base.yml / ...
+  build-chromium.yml       build-chromium.yml main   codewiki.yml       sca.yml / code-review.yml
+  （web_trigger 事件）      （crontab 定时事件）                      knowledge-base.yml / ...
+                           （build-alpine.yml 每天 00:05 先产出基座）
          │
          ▼
 构建层（build-chromium.sh，被 source 执行）
@@ -30,7 +31,7 @@
          │
          ▼
 元数据层
-  .cnb/annotation.json → cnbcool/annotations → 当前 commit 元数据 → README 徽章
+  .cnb/annotation-chromium.json → cnbcool/annotations → 当前 commit 元数据 → README 徽章
 ```
 
 ## 三层职责
@@ -50,7 +51,7 @@
 | 事件                           | 来源                  | 做什么                                                                                          | 配置                                                             |
 |--------------------------------|-----------------------|-------------------------------------------------------------------------------------------------|------------------------------------------------------------------|
 | `web_trigger_build_chromium`   | 页面按钮              | 多架构构建、推送、冒烟、派生单平台标签、写元数据                                                | `web_trigger.yml` → `build-chromium.yml`                         |
-| `crontab: 5 1 * * *`           | 定时（Asia/Shanghai） | 同上，`version` 固定 `latest`                                                                   | `.cnb.yml` 的 `main`                                             |
+| `crontab: 5 1 * * *`           | 定时（Asia/Shanghai） | 同上，`version` 固定 `latest`                                                                   | `build-chromium.yml` 的 `main`                                   |
 | `web_trigger_build_alpine`     | 页面按钮              | 另一条流水线：Alpine 基础镜像（`build-alpine.yml`，`crontab: 5 0 * * *`），也是 Chromium 的基座 | `web_trigger.yml` → `build-alpine.yml`                           |
 | `tag_push`                     | `git push --tags`     | 生成 Code Wiki 并入库知识库                                                                     | `codewiki.yml`                                                   |
 | `web_trigger_codewiki`         | 页面按钮              | 同 Code Wiki，手动入口                                                                          | `web_trigger.yml` → `codewiki.yml`                               |
@@ -125,7 +126,7 @@ Dockerfile 放在 `.cnb/docker/` 而不是根目录，是为了让 `.cnb/` 自�
 
 构建流水线只有手动与定时两个入口，没有 PR 校验：改坏 Dockerfile 要等下一次手动触发或次日定时任务才会暴露。需要提前验证时，可以按 [README](README.md) 里的本地构建命令跑一次 amd64 构建加三次冒烟（`chromium --version`、`--dump-dom about:blank`、`date +%Z` 为 `CST`）；本地不传 `CHROMIUM_BASE_IMAGE`，基座是官方 `alpine`，不需要私有仓库。
 
-构建完成后脚本用 `docker buildx imagetools inspect` 取 manifest digest 与各平台镜像清单里的层体积，写成 `.cnb/annotation.json`，交由 `cnbcool/annotations` 插件写入 commit 元数据。细节见[构建元数据](metadata-and-badges.md)。
+构建完成后脚本用 `docker buildx imagetools inspect` 取 manifest digest 与各平台镜像清单里的层体积，写成 `.cnb/annotation-chromium.json`，交由 `cnbcool/annotations` 插件写入 commit 元数据。细节见[构建元数据](metadata-and-badges.md)。
 
 ## 产物与提交的映射
 

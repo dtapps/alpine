@@ -102,8 +102,6 @@ default:
     - name: 'docker:28-dind'
       alias: docker
   before_script:
-    # dotenv 报告先建空文件：放在第一步，后面任何一步失败时报告也不会缺文件
-    - 'mkdir -p .gitlab && : > .gitlab/build.env'
     - apk add --no-cache git jq
     - git config --global --add safe.directory "$CI_PROJECT_DIR"
     - |

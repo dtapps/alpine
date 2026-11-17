@@ -10,8 +10,7 @@ updates:
       - 'dependencies'
       - 'github-actions'
 
-  # Docker 基础镜像依赖（扫描 Dockerfile 里的 FROM 镜像标签）
-  # 三平台各留一份 Dockerfile 副本，所以按目录分别扫描，避免只覆盖 GitHub 侧。
+  # Docker 基础镜像依赖（分别扫描三侧 Dockerfile 的 FROM / ARG 镜像标签）
   - package-ecosystem: 'docker'
     directory: '/.github/docker'
     schedule:
@@ -20,6 +19,7 @@ updates:
       - 'dependencies'
       - 'docker'
 
+  # CNB 依赖（分别扫描三侧 .cnb/docker 下的 FROM / ARG 镜像标签）
   - package-ecosystem: 'docker'
     directory: '/.cnb/docker'
     schedule:
@@ -28,6 +28,7 @@ updates:
       - 'dependencies'
       - 'docker'
 
+  # GitLab CI 依赖（分别扫描三侧 .gitlab/docker 下的 FROM / ARG 镜像标签）
   - package-ecosystem: 'docker'
     directory: '/.gitlab/docker'
     schedule:

@@ -1,8 +1,10 @@
 # Alpine 基础镜像 + Alpine + Chromium 镜像
 
-[![定时构建](https://cnb.cool/dtapp/alpine/-/badge/git/latest/ci/status/crontab)](https://cnb.cool/dtapp/alpine/-/pipeline) [![流水线配置](https://cnb.cool/dtapp/alpine/-/badge/git/latest/ci/pipeline-as-code)](https://cnb.cool/dtapp/alpine/-/blob/main/.cnb.yml) [![漏洞扫描](https://cnb.cool/dtapp/alpine/-/badge/security/vulnerability/full/latest)](https://cnb.cool/dtapp/alpine/-/security) [![CNB 访问次数](https://commit.cool/badge/visit/dtapp/alpine)](https://cnb.cool/dtapp/alpine) [![build-alpine](https://github.com/dtapps/alpine/actions/workflows/build-alpine.yml/badge.svg)](https://github.com/dtapps/alpine/actions/workflows/build-alpine.yml) [![build-chromium](https://github.com/dtapps/alpine/actions/workflows/build-chromium.yml/badge.svg)](https://github.com/dtapps/alpine/actions/workflows/build-chromium.yml) [![GitHub 访问次数](https://visitor-badge.laobi.icu/badge?page_id=dtapps.alpine)](https://github.com/dtapps/alpine) [![GitLab pipeline](https://gitlab.com/dtapps/alpine/badges/main/pipeline.svg)](https://gitlab.com/dtapps/alpine/-/pipelines) [![GitLab 访问次数](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fgitlab.com%2Fdtapps%2Falpine&count_bg=%23FC6D26&title_bg=%23555555&title=GitLab%20Hits&edge_flat=false)](https://gitlab.com/dtapps/alpine)
+[![CNB 定时构建](https://cnb.cool/dtapp/alpine/-/badge/git/latest/ci/status/crontab)](https://cnb.cool/dtapp/alpine/-/pipeline) [![CNB 流水线配置](https://cnb.cool/dtapp/alpine/-/badge/git/latest/ci/pipeline-as-code)](https://cnb.cool/dtapp/alpine/-/blob/main/.cnb.yml) [![CNB 漏洞扫描](https://cnb.cool/dtapp/alpine/-/badge/security/vulnerability/full/latest)](https://cnb.cool/dtapp/alpine/-/security) [![CNB 访问次数](https://commit.cool/badge/visit/dtapp/alpine)](https://cnb.cool/dtapp/alpine) [![CNB 拉取次数](https://commit.cool/badge/package/docker/pulls/dtapp/alpine)](https://cnb.cool/dtapp/alpine) [![CNB 星标](https://cnb.cool/dtapp/alpine/-/badge/star)](https://cnb.cool/dtapp/alpine) [![CNB 复刻](https://cnb.cool/dtapp/alpine/-/badge/fork)](https://cnb.cool/dtapp/alpine) [![CNB 主要语言](https://commit.cool/badge/language/dtapp/alpine)](https://cnb.cool/dtapp/alpine) [![CNB 许可证](https://commit.cool/badge/license/dtapp/alpine)](https://cnb.cool/dtapp/alpine) [![CNB 存储用量](https://commit.cool/badge/usage/dtapp/alpine)](https://cnb.cool/dtapp/alpine) [![CNB Git 存储](https://commit.cool/badge/usage/git/dtapp/alpine)](https://cnb.cool/dtapp/alpine) [![CNB LFS 存储](https://commit.cool/badge/usage/lfs/dtapp/alpine)](https://cnb.cool/dtapp/alpine) [![CNB 仓库年龄](https://commit.cool/badge/age/dtapp/alpine)](https://cnb.cool/dtapp/alpine)
 
-[![CNB pulls](https://commit.cool/badge/package/docker/pulls/dtapp/alpine)](https://cnb.cool/dtapp/alpine) [![ghcr alpine pulls](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fghcr-badge.elias.eu.org%2Fapi%2Fdtapps%2Falpine&query=downloadCount&label=ghcr%20alpine%20pulls&logo=docker&logoColor=white&color=2496ed)](https://github.com/dtapps/alpine/pkgs/container/alpine) [![ghcr chromium pulls](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fghcr-badge.elias.eu.org%2Fapi%2Fdtapps%2Falpine%25252Fchromium&query=downloadCount&label=ghcr%20chromium%20pulls&logo=docker&logoColor=white&color=2496ed)](https://github.com/dtapps/alpine/pkgs/container/alpine%2Fchromium)
+[![GitHub Alpine 构建](https://github.com/dtapps/alpine/actions/workflows/build-alpine.yml/badge.svg)](https://github.com/dtapps/alpine/actions/workflows/build-alpine.yml) [![GitHub Chromium 构建](https://github.com/dtapps/alpine/actions/workflows/build-chromium.yml/badge.svg)](https://github.com/dtapps/alpine/actions/workflows/build-chromium.yml) [![GitHub 访问次数](https://visitor-badge.laobi.icu/badge?page_id=dtapps.alpine)](https://github.com/dtapps/alpine) [![GHCR Alpine 拉取次数](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fghcr-badge.elias.eu.org%2Fapi%2Fdtapps%2Falpine&query=downloadCount&label=GHCR%20Alpine%20%E6%8B%89%E5%8F%96&logo=docker&logoColor=white&color=2496ed)](https://github.com/dtapps/alpine/pkgs/container/alpine) [![GHCR Chromium 拉取次数](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fghcr-badge.elias.eu.org%2Fapi%2Fdtapps%2Falpine%25252Fchromium&query=downloadCount&label=GHCR%20Chromium%20%E6%8B%89%E5%8F%96&logo=docker&logoColor=white&color=2496ed)](https://github.com/dtapps/alpine/pkgs/container/alpine%2Fchromium) [![GitHub 星标](https://img.shields.io/github/stars/dtapps/alpine?label=%E6%98%9F%E6%A0%87)](https://github.com/dtapps/alpine) [![GitHub 复刻](https://img.shields.io/github/forks/dtapps/alpine?label=%E5%A4%8D%E5%88%BB)](https://github.com/dtapps/alpine) [![GitHub 主要语言](https://img.shields.io/github/languages/top/dtapps/alpine)](https://github.com/dtapps/alpine) [![GitHub 许可证](https://img.shields.io/github/license/dtapps/alpine?label=%E8%AE%B8%E5%8F%AF%E8%AF%81)](https://github.com/dtapps/alpine) [![GitHub 存储](https://img.shields.io/github/repo-size/dtapps/alpine?label=%E5%AD%98%E5%82%A8)](https://github.com/dtapps/alpine) [![GitHub 创建于](https://img.shields.io/github/created-at/dtapps/alpine?label=%E5%88%9B%E5%BB%BA%E4%BA%8E)](https://github.com/dtapps/alpine) [![GitHub 提交频率](https://img.shields.io/github/commit-activity/m/dtapps/alpine?label=%E6%8F%90%E4%BA%A4%E9%A2%91%E7%8E%87)](https://github.com/dtapps/alpine) [![GitHub 最近提交](https://img.shields.io/github/last-commit/dtapps/alpine?label=%E6%9C%80%E8%BF%91%E6%8F%90%E4%BA%A4)](https://github.com/dtapps/alpine) [![GitHub 贡献者](https://img.shields.io/github/contributors/dtapps/alpine?label=%E8%B4%A1%E8%B4%A1%E8%80%85)](https://github.com/dtapps/alpine)
+
+[![GitLab 流水线](https://gitlab.com/dtapps/alpine/badges/main/pipeline.svg)](https://gitlab.com/dtapps/alpine/-/pipelines) [![GitLab 访问次数](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fgitlab.com%2Fdtapps%2Falpine&count_bg=%23FC6D26&title_bg=%23555555&title=GitLab%20%E8%AE%BF%E9%97%AE%E6%AC%A1%E6%95%B0&edge_flat=false)](https://gitlab.com/dtapps/alpine) [![GitLab 星标](https://img.shields.io/gitlab/stars/88585265?label=%E6%98%9F%E6%A0%87)](https://gitlab.com/dtapps/alpine) [![GitLab 复刻](https://img.shields.io/gitlab/forks/88585265?label=%E5%A4%8D%E5%88%BB)](https://gitlab.com/dtapps/alpine) [![GitLab 许可证](https://img.shields.io/gitlab/license/88585265?label=%E8%AE%B8%E5%8F%AF%E8%AF%81)](https://gitlab.com/dtapps/alpine) [![GitLab 最近提交](https://img.shields.io/gitlab/last-commit/88585265?label=%E6%9C%80%E8%BF%91%E6%8F%90%E4%BA%A4)](https://gitlab.com/dtapps/alpine) [![GitLab 贡献者](https://img.shields.io/gitlab/contributors/88585265?label=%E8%B4%A1%E8%B4%A1%E8%80%85)](https://gitlab.com/dtapps/alpine)
 
 本仓库用三套流水线构建两个自建镜像：CNB 推送到制品库（`docker.cnb.cool/dtapp/alpine`），GitHub Actions 推送到 GHCR（`ghcr.io/dtapps/alpine`），[GitLab CI](https://gitlab.com/dtapps/alpine/-/pipelines) 推送到 GitLab Container Registry（`registry.gitlab.com/dtapps/alpine`，脚本里仍由 `$CI_REGISTRY_IMAGE` 派生）。三个平台各维护一份 Dockerfile 与构建脚本（有意复制，不互相引用），标签契约保持一致；改镜像内容或标签规则时三份都要改，见 [docs/github.md](docs/github.md) 与 [docs/gitlab.md](docs/gitlab.md)。
 
@@ -61,6 +63,8 @@ FROM registry.gitlab.com/dtapps/alpine:latest
 │   ├── build-alpine.sh             # Alpine 基础镜像构建
 │   └── build-chromium.sh           # Chromium 镜像构建（一次多架构构建 + 5 标签）
 ├── workflows/                      # build-alpine.yml / build-chromium.yml / 扫描与评审流水线
+├── annotation.json                 # CI 生成的镜像元数据（.gitignore 已排除）
+├── annotation-chromium.json        # Chromium 镜像元数据（.gitignore 已排除）
 └── web_trigger.yml                 # 两个镜像各一个手动按钮
 .github/
 ├── docker/                         # GitHub 侧的 Dockerfile 副本（alpine / chromium；headless 仅派生用）
@@ -69,6 +73,7 @@ FROM registry.gitlab.com/dtapps/alpine:latest
 │   ├── build-alpine.yml            # GitHub 平台：构建并推送 ghcr.io/<owner>/<repo>
 │   └── build-chromium.yml          # GitHub 平台：构建并推送 ghcr.io/<owner>/<repo>/chromium
 ├── annotation.json                 # CI 生成的镜像元数据（.gitignore 已排除）
+├── annotation-chromium.json        # Chromium 镜像元数据（.gitignore 已排除）
 └── dependabot.yml                  # GitHub Actions 与 Docker 基础镜像依赖更新
 .gitlab/
 ├── docker/                         # GitLab 侧的 Dockerfile 副本（alpine / chromium；headless 仅派生用）
@@ -77,7 +82,7 @@ FROM registry.gitlab.com/dtapps/alpine:latest
 │   ├── build-alpine.yml            # build-alpine job（stage: alpine）
 │   └── build-chromium.yml          # build-chromium job（stage: chromium，needs build-alpine）
 ├── annotation.json                 # CI 生成的镜像元数据（.gitignore 已排除）
-└── build.env                       # CI 生成的 dotenv 报告（.gitignore 已排除）
+└── annotation-chromium.json        # Chromium 镜像元数据（.gitignore 已排除）
 .gitlab-ci.yml                      # 根入口：workflow / stages / variables / .docker-build 共享片段
 docs/
 ├── alpine/                         # Alpine 基础镜像文档（README + index + 12 篇）
@@ -115,6 +120,30 @@ GitHub 与 GitLab 的 hosted runner 都在境外，直连官方源最快，这�
 | Gitee   | https://gitee.com/dtapps/alpine  |
 | GitCode | https://gitcode.com/dtapp/alpine |
 
-## 许可
+## 许可证
 
-[MIT](LICENSE)
+见 [LICENSE](LICENSE) 文件。
+
+## Star 走势
+
+<details>
+<summary><b>点击展开查看图表</b></summary>
+
+**CNB**
+
+[![CNB Star 走势](https://commit.cool/stars/dtapp/alpine)](https://cnb.cool/dtapp/alpine)
+
+**GitHub**
+
+[![GitHub Star 走势](https://api.star-history.com/chart?repos=dtapps/alpine&type=date&legend=top-left)](https://www.star-history.com/?repos=dtapps%2Falpine&type=date&legend=top-left)
+
+</details>
+
+## 下载量统计图
+
+<details>
+<summary><b>点击展开查看图表</b></summary>
+
+[![下载量统计图](https://release-monitor.com/chart/dtapps/alpine.svg?stable=5)](https://release-monitor.com/#/dtapps/alpine)
+
+</details>

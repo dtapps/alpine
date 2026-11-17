@@ -10,11 +10,11 @@ build-chromium.sh
   ├─ docker buildx imagetools inspect <基座>:<alpine 版本>   解析基座 digest（构建前已完成）
   ├─ imagetools inspect <alpine 版本>@<平台清单 digest> --raw   取该架构镜像清单里 config 与各 layer 的 size
   ├─ docker run <alpine 版本> chromium --version   取浏览器精确版本
-  └─ heredoc 写 .cnb/annotation.json（13 个 key）
+  └─ heredoc 写 .cnb/annotation-chromium.json（13 个 key）
           │
           ▼
 stages 第二步：image: cnbcool/annotations:latest
-  settings: type: ADD / fromJsonFile: .cnb/annotation.json
+  settings: type: ADD / fromJsonFile: .cnb/annotation-chromium.json
           │
           ▼
 当前 commit 的元数据  ←  /-/badge/annotation/commit/latest/{key}
@@ -29,12 +29,14 @@ stages 第二步：image: cnbcool/annotations:latest
   image: cnbcool/annotations:latest
   settings:
     type: ADD
-    fromJsonFile: .cnb/annotation.json
+    fromJsonFile: .cnb/annotation-chromium.json
 ```
 
 `type: ADD` 表示新增或覆盖 key，`fromJsonFile` 指向脚本写出的扁平 JSON。插件对输入有限制：key 只允许 `0-9a-zA-Z_-`，value 不允许含换行，所以脚本只输出一层、单行的值。
 
-这段 stages 在两个入口各有一份：手动按钮触发的 `.cnb/workflows/build-chromium.yml`（事件 `web_trigger_build_chromium`）与 `.cnb.yml` 里的 `'crontab: 5 1 * * *'`。两份内容必须一致——只改一处，另一条流水线跑完就不会写入元数据，徽章会停在旧值或退回 `unknown`。
+文件名与 Alpine 基础镜像的 `.cnb/annotation.json` 分开（`annotation-chromium.json`），与 GitHub / GitLab 侧一致：两个镜像各写各的文件，互不覆盖。
+
+这段 stages 在手动按钮触发的事件 `web_trigger_build_chromium` 与定时事件 `'crontab: 5 1 * * *'` 上共用同一份 job 定义（同一文件里的 YAML 锚点），改一处即可覆盖两个入口。
 
 ## 生成的 JSON
 

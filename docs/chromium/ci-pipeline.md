@@ -1,10 +1,10 @@
 # CI 流水线
 
-> `.cnb.yml` 只负责 `include` 与定时任务，每个事件的具体步骤分散在 `.cnb/workflows/*.yml`；这里讲清这套组织方式、事件与 workflow 的逐条对应、构建流水线的九个步骤与它的入参校验/缓存策略，以及改动流水线时必须同步的位置。
+> `.cnb.yml` 只负责 `include`，每个事件的具体步骤分散在 `.cnb/workflows/*.yml`；这里讲清这套组织方式、事件与 workflow 的逐条对应、构建流水线的九个步骤与它的入参校验/缓存策略，以及改动流水线时必须同步的位置。
 
 ## 为什么拆成 include
 
-一条流水线要同时承载构建、扫描、评审、文档生成、知识库同步五类互不相关的事情。全塞进 `.cnb.yml` 会得到一份几百行、谁都不敢动的文件，所以按「一个事件一组职责」拆成 8 个文件，`.cnb.yml` 只保留两件事：`include` 列表和 `main` 上的定时任务。改 SCA 阈值不会碰到构建脚本，改构建不会误删评审配置。
+一条流水线要同时承载构建、扫描、评审、文档生成、知识库同步五类互不相关的事情。全塞进 `.cnb.yml` 会得到一份几百行、谁都不敢动的文件，所以按「一个事件一组职责」拆成 8 个文件，`.cnb.yml` 只保留 `include` 列表。改 SCA 阈值不会碰到构建脚本，改构建不会误删评审配置。
 
 仓库合并后这里有两套构建流水线：`build-alpine.yml`（Alpine 基础镜像，`web_trigger_build_alpine` + `crontab: 5 0 * * *`）与 `build-chromium.yml`（本篇的 Chromium 镜像，`web_trigger_build_chromium` + `crontab: 5 1 * * *`）。二者不是并列关系：**Chromium 的基座就是 build-alpine 的产物**，构建前按 `version` 选基座标签、解析出实际 Alpine 版本，再钉 `<仓库 slug>:<实际版本>` 的 digest，取不到直接失败。两条 cron 因此必须保持先后：`00:05` 先产基座，`01:05` 再叠 Chromium（中间留 1 小时给基座构建与 latest 提升），同时也避开了两个多架构重任务同时跑。
 
@@ -13,44 +13,49 @@
 ## 配置的三层结构
 
 ```yaml
+# .cnb.yml：只列 include
 include:
   - .cnb/workflows/build-alpine.yml
   - .cnb/workflows/build-chromium.yml
   # ... 共 8 个文件
 
+# .cnb/workflows/build-chromium.yml：job 定义一次，手动与定时两个入口共用
+.build_chromium: &build_chromium
+  name: build-chromium
+  stages:
+    - name: 构建并推送多架构镜像
+      script: |
+        source .cnb/scripts/build-chromium.sh
+
+'**':
+  web_trigger_build_chromium:      # 手动按钮
+    - *build_chromium
+
 main:
-  'crontab: 5 0 * * *':   # Alpine 基础镜像（Chromium 的基座）
-    - name: build-alpine
-      stages:
-        - name: 构建并推送多架构镜像
-          script: |
-            source .cnb/scripts/build-alpine.sh
-  'crontab: 5 1 * * *':  # Chromium 镜像（基座产出后才能跑）
-    - name: build-chromium
-      stages:
-        - name: 构建并推送多架构镜像
-          script: |
-            source .cnb/scripts/build-chromium.sh
+  'crontab: 5 1 * * *':            # 定时任务（北京时间 01:05）
+    - *build_chromium
 ```
 
 两层键决定「什么时候跑」：
 
-- 顶层键是分支过滤器。`.cnb.yml` 里定时任务挂在 `main` 下，只对默认分支生效；8 个 workflow 文件统一用 `'**'`，对所有分支生效。
+- 顶层键是分支过滤器。定时任务挂在 `main` 下，只对默认分支生效；8 个 workflow 文件的其它事件统一用 `'**'`，对所有分支生效。
 - 事件名在过滤器下一层，值是流水线数组。`push`、`pull_request`、`tag_push`、`issue.open`、`web_trigger_build_chromium` 都是同级事件键；定时事件把 cron 表达式写进键名并加引号（`'crontab: 5 1 * * *'`），因为键值里有空格和 `*`。两条构建流水线只有 `web_trigger_*` 与定时两个入口，`push` / `pull_request` 属于本目录的其它 workflow。
+
+手动与定时两个入口共用同一份 job 定义，靠的是**单文件内的 YAML 锚点**（`&build_chromium` / `*build_chromium`）：CNB 的锚点不能跨 `include` 文件，所以定时任务与按钮必须写在同一个 workflow 文件里。跨文件复用要用 `include` + `!reference`，本仓库没有这种需求。
 
 ## 事件与 workflow 对应表
 
-| 事件                                                | 定义位置                                                                                       | 产物                                                                                                                                                       |
-|-----------------------------------------------------|------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `web_trigger_build_chromium`                        | `workflows/build-chromium.yml`                                                                 | 解析本仓库基座实际版本与 digest → 1 次多架构 `buildx build --push` → 派生两个单平台标签 → 冒烟与基座标签校验 → 提升 minor / latest；`.cnb/annotation.json` |
-| `'crontab: 5 1 * * *'`                              | `.cnb.yml` 的 `main`                                                                           | 同上，但 `version` 恒为 `latest`：产物版本标签仍是解析出的实际 Alpine 版本，只是不会切到别的基座分支                                                       |
-| `web_trigger_build_alpine` / `'crontab: 5 0 * * *'` | `workflows/build-alpine.yml`、`.cnb.yml` 的 `main`                                             | 另一条流水线：Alpine 基础镜像，也是 Chromium 的基座（自身细节见 [Alpine 基础镜像文档](../alpine/index.md)）                                                |
-| `tag_push`                                          | `workflows/codewiki.yml`                                                                       | `${CNB_BUILD_WORKSPACE}/${CNB_REPO_SLUG}/codewiki` 下的 Code Wiki                                                                                          |
-| `web_trigger_codewiki`                              | `workflows/codewiki.yml`                                                                       | 同上                                                                                                                                                       |
-| `push`                                              | `workflows/sca.yml`、`workflows/knowledge-base.yml`                                            | SCA 全量报告附件、知识库索引                                                                                                                               |
-| `pull_request`                                      | `workflows/code-review.yml`、`workflows/cnb-sechook.yml`、`workflows/code-security-config.yml` | PR 评论、扫描与敏感信息统计、扫描配置校验结果                                                                                                              |
-| `pull_request.target`                               | `workflows/sca.yml`                                                                            | 增量扫描，`failOnSeverity: high` 时门禁失败                                                                                                                |
-| `issue.open` / `issue.comment`                      | `workflows/knowledge-base.yml`                                                                 | 知识库同步                                                                                                                                                 |
+| 事件                                                | 定义位置                                                                                       | 产物                                                                                                                                                                |
+|-----------------------------------------------------|------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `web_trigger_build_chromium`                        | `workflows/build-chromium.yml`                                                                 | 解析本仓库基座实际版本与 digest → 1 次多架构 `buildx build --push` → 派生两个单平台标签 → 冒烟与基座标签校验 → 提升 minor / latest；`.cnb/annotation-chromium.json` |
+| `'crontab: 5 1 * * *'`                              | `workflows/build-chromium.yml` 的 `main`                                                       | 同上，但 `version` 恒为 `latest`：产物版本标签仍是解析出的实际 Alpine 版本，只是不会切到别的基座分支                                                                |
+| `web_trigger_build_alpine` / `'crontab: 5 0 * * *'` | `workflows/build-alpine.yml`                                                                   | 另一条流水线：Alpine 基础镜像，也是 Chromium 的基座（自身细节见 [Alpine 基础镜像文档](../alpine/index.md)）                                                         |
+| `tag_push`                                          | `workflows/codewiki.yml`                                                                       | `${CNB_BUILD_WORKSPACE}/${CNB_REPO_SLUG}/codewiki` 下的 Code Wiki                                                                                                   |
+| `web_trigger_codewiki`                              | `workflows/codewiki.yml`                                                                       | 同上                                                                                                                                                                |
+| `push`                                              | `workflows/sca.yml`、`workflows/knowledge-base.yml`                                            | SCA 全量报告附件、知识库索引                                                                                                                                        |
+| `pull_request`                                      | `workflows/code-review.yml`、`workflows/cnb-sechook.yml`、`workflows/code-security-config.yml` | PR 评论、扫描与敏感信息统计、扫描配置校验结果                                                                                                                       |
+| `pull_request.target`                               | `workflows/sca.yml`                                                                            | 增量扫描，`failOnSeverity: high` 时门禁失败                                                                                                                         |
+| `issue.open` / `issue.comment`                      | `workflows/knowledge-base.yml`                                                                 | 知识库同步                                                                                                                                                          |
 
 `push` 在两个文件里各声明一次，一次 push 会同时拉起 SCA 全量扫描与知识库构建，两段互不依赖；`tag_push` 与 `web_trigger_codewiki` 在 `codewiki.yml` 里是两份内容相同的流水线，改生成参数必须同步两处。`sca.yml` 不响应普通 `pull_request`，PR 上只有 `pull_request.target` 那一段（增量 + `failOnSeverity: high` 门禁）；`push` 侧的全量扫描刻意把 `failOnSeverity` 留在注释状态——上游未修的 CVE 必然出现在全量报告里，设门禁只会让每次 push 常红，失去「留一份基线」的意义，理由见[安全基线](security-baseline.md)。
 
@@ -70,7 +75,7 @@ main:
 | 6 | 单平台标签          | 从 manifest list 取每个架构的清单 digest，`imagetools create` 打 `<alpine 版本>-linux-<arch>`                                                   |
 | 7 | 冒烟 + 标签校验     | 跑 `chromium --version`、无头渲染 `about:blank`、时区断言，再校验 OCI `base.name` / `version` 两个标签                                          |
 | 8 | 提升 minor / latest | 仅当 `dtapp/alpine:<同名标签>` 已指向本次基座 digest 时提升；否则跳过并打日志                                                                   |
-| 9 | 汇总元数据          | digest / 两个平台的体积 / 基座信息 / `chromium_version` / `chromium_built_at` 写进 `.cnb/annotation.json`                                       |
+| 9 | 汇总元数据          | digest / 两个平台的体积 / 基座信息 / `chromium_version` / `chromium_built_at` 写进 `.cnb/annotation-chromium.json`                              |
 
 每一步失败都显式退出：登录、基座解析、构建、单平台派生、冒烟、提升各自 `|| exit 1`，脚本不会留下「只有多架构、没有单平台」的半成品还继续写元数据。
 
@@ -199,17 +204,17 @@ services:
 
 ## 插件职责
 
-| 插件镜像                           | 出现位置                                | 职责与关键参数                                                                                                 |
-|------------------------------------|-----------------------------------------|----------------------------------------------------------------------------------------------------------------|
-| `cnbcool/annotations:latest`       | `build-chromium.yml`、`.cnb.yml` `main` | `type: ADD` + `fromJsonFile: .cnb/annotation.json`，写 commit 元数据（键带 `chromium_` 前缀）                  |
-| `cnbcool/codewiki:latest`          | `codewiki.yml`                          | 生成 Code Wiki，`git_doc_dir` 指定落盘目录，`timeout: 3h`                                                      |
-| `cnbcool/knowledge-base`           | `knowledge-base.yml`                    | `include: '**/**.md'`、`issueSyncEnabled: true`、`ignoreProcessFailures: true`                                 |
-| `cnbcool/sca-vulnerability:latest` | `sca.yml`                               | 组件漏洞扫描，`scanMode: full/diff`、`publish: true`；`failOnSeverity: high` 只在 `pull_request.target` 上启用 |
-| `cnbcool/sca-license:latest`       | `sca.yml`                               | License 扫描，参数同上                                                                                         |
-| `cnbcool/sca-sbom:latest`          | `sca.yml`                               | SBOM，`format: spdx`                                                                                           |
-| `cnbcool/code-review:latest`       | `code-review.yml`                       | PR 上的 AI 评审，`comment`、`min_severity`、`exclude_categories`、`model` 等                                   |
-| `cnbcool/cnb-sechook`              | `cnb-sechook.yml`                       | 汇总扫描结果与敏感信息统计，`max_display_authors: 5`                                                           |
-| `cnbcool/code-security-config`     | `code-security-config.yml`              | `args: [validate]`，校验扫描配置本身合法                                                                       |
+| 插件镜像                           | 出现位置                   | 职责与关键参数                                                                                                 |
+|------------------------------------|----------------------------|----------------------------------------------------------------------------------------------------------------|
+| `cnbcool/annotations:latest`       | `build-chromium.yml`       | `type: ADD` + `fromJsonFile: .cnb/annotation-chromium.json`，写 commit 元数据（键带 `chromium_` 前缀）         |
+| `cnbcool/codewiki:latest`          | `codewiki.yml`             | 生成 Code Wiki，`git_doc_dir` 指定落盘目录，`timeout: 3h`                                                      |
+| `cnbcool/knowledge-base`           | `knowledge-base.yml`       | `include: '**/**.md'`、`issueSyncEnabled: true`、`ignoreProcessFailures: true`                                 |
+| `cnbcool/sca-vulnerability:latest` | `sca.yml`                  | 组件漏洞扫描，`scanMode: full/diff`、`publish: true`；`failOnSeverity: high` 只在 `pull_request.target` 上启用 |
+| `cnbcool/sca-license:latest`       | `sca.yml`                  | License 扫描，参数同上                                                                                         |
+| `cnbcool/sca-sbom:latest`          | `sca.yml`                  | SBOM，`format: spdx`                                                                                           |
+| `cnbcool/code-review:latest`       | `code-review.yml`          | PR 上的 AI 评审，`comment`、`min_severity`、`exclude_categories`、`model` 等                                   |
+| `cnbcool/cnb-sechook`              | `cnb-sechook.yml`          | 汇总扫描结果与敏感信息统计，`max_display_authors: 5`                                                           |
+| `cnbcool/code-security-config`     | `code-security-config.yml` | `args: [validate]`，校验扫描配置本身合法                                                                       |
 
 扫描策略与忽略规则见[安全基线](security-baseline.md)，插件参数排错见[排错手册](troubleshooting.md)。
 

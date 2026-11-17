@@ -124,12 +124,12 @@ jobs:
           {
             echo '### Chromium 镜像（GHCR）'
             echo ''
-            if [ -f .github/annotation.json ]; then
+            if [ -f .github/annotation-chromium.json ]; then
               echo '| 键 | 值 |'
               echo '| --- | --- |'
-              jq -r 'to_entries[] | "| \(.key) | \(.value) |"' .github/annotation.json
+              jq -r 'to_entries[] | "| \(.key) | \(.value) |"' .github/annotation-chromium.json
             else
-              echo '本次没有产出 .github/annotation.json（构建在元数据步骤之前就失败）。'
+              echo '本次没有产出 .github/annotation-chromium.json（构建在元数据步骤之前就失败）。'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -138,7 +138,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: chromium-annotation
-          path: .github/annotation.json
+          path: .github/annotation-chromium.json
           if-no-files-found: warn
           retention-days: 30
 
