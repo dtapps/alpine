@@ -1,5 +1,39 @@
+# job 定义锚点：手动按钮与定时任务共用同一份 job，CNB 锚点只在单文件内有效，
+# 所以把定时任务的 crontab 事件也放到本文件（见下方 main），不要搬到 .cnb.yml。
+.build_alpine: &build_alpine
+  name: build-alpine
+  runner:
+    tags: cnb:arch:amd64 # 指定 Runner 必须有这个标签
+    # cpus: 64 # 如有需要，可根据实际情况调整
+  # CNB 的 docker 服务默认已支持多架构 buildx，无需 options.rootlessBuildkitd
+  services:
+    - docker # 启用 Docker 服务（用于 docker buildx/push）
+  # 远程 import 是可变引用：main 一改 CI 行为就变，PR 里看不到，也无法审计。
+  # TODO 收敛：把 docker.yml vendor 进 .cnb/envs/ 纳入评审，或至少钉到具体
+  # commit（https://cnb.cool/dtapp/envs/-/blob/<40 位 sha>/docker.yml）。
+  imports:
+    - https://cnb.cool/dtapp/envs/-/blob/main/docker.yml # 引入环境变量/配置
+    # 不要把 .cnb/scripts/build-alpine.sh 放进 imports：imports 会对被引入的文件
+    # 做变量处理，脚本里的 ${...} 会被改写成带引号的字面量（CI 上表现为
+    # `sed: can't read "${DOCKERFILE:-.cnb/docker/Dockerfile.alpine}"`）。脚本在仓库里，
+    # 由下面的 `source` 直接执行即可。
+  stages:
+    - name: 构建并推送多架构镜像
+      script: |
+        source .cnb/scripts/build-alpine.sh
+    # 把本次产物的 digest / 体积 / 构建时间写成 commit 元数据。
+    # README 徽章从 /-/badge/annotation/commit/latest/{key} 读取这几个值。
+    - name: 写入镜像元数据
+      # cnbcool/annotations 目前只发 :latest，没有可固定的版本 tag，构建网络内也
+      # 取不到 digest（hub.docker.com 不可达）。TODO 待其发布版本化 tag 后改成
+      # @sha256:<digest>，避免插件升级悄悄改变元数据写入行为。
+      image: cnbcool/annotations:latest
+      settings:
+        type: ADD
+        fromJsonFile: .cnb/annotation.json
+
 '**':
-  # 自定义按钮可触发的事件：web_trigger_build_alpine
+  # 手动按钮：通过页面自定义按钮触发（web_trigger_build_alpine）。
   # 单条流水线内用 docker buildx 一次构建 amd64 + arm64，直接产出多架构 manifest list；
   # 两个单平台标签从这份 manifest 派生。基座默认 alpine:latest（每天跟上游），
   # 脚本解析出实际版本后直接用它当标签（同名标签每天覆盖），latest / minor 在冒烟
@@ -10,34 +44,17 @@
   # https://cnb.cool/loviselu/docker-buildx-multi-platform-example
   # https://cnb.cool/examples/ecosystem/docker-buildx-multi-platform-example
   web_trigger_build_alpine:
-    - name: build-alpine
-      runner:
-        tags: cnb:arch:amd64 # 指定 Runner 必须有这个标签
-        # cpus: 64 # 如有需要，可根据实际情况调整
-      # CNB 的 docker 服务默认已支持多架构 buildx，无需 options.rootlessBuildkitd
-      services:
-        - docker # 启用 Docker 服务（用于 docker buildx/push）
-      # 远程 import 是可变引用：main 一改 CI 行为就变，PR 里看不到，也无法审计。
-      # TODO 收敛：把 docker.yml vendor 进 .cnb/envs/ 纳入评审，或至少钉到具体
-      # commit（https://cnb.cool/dtapp/envs/-/blob/<40 位 sha>/docker.yml）。
-      imports:
-        - https://cnb.cool/dtapp/envs/-/blob/main/docker.yml # 引入环境变量/配置
-        # 不要把 .cnb/scripts/build-alpine.sh 放进 imports：imports 会对被引入的文件
-        # 做变量处理，脚本里的 ${...} 会被改写成带引号的字面量（CI 上表现为
-        # `sed: can't read "${DOCKERFILE:-.cnb/docker/Dockerfile.alpine}"`）。脚本在仓库里，
-        # 由下面的 `source` 直接执行即可。
-      stages:
-        - name: 构建并推送多架构镜像
-          script: |
-            source .cnb/scripts/build-alpine.sh
-        # 把本次产物的 digest / 体积 / 构建时间写成 commit 元数据。
-        # README 徽章从 /-/badge/annotation/commit/latest/{key} 读取这几个值。
-        - name: 写入镜像元数据
-          # cnbcool/annotations 目前只发 :latest，没有可固定的版本 tag，构建网络内也
-          # 取不到 digest（hub.docker.com 不可达）。TODO 待其发布版本化 tag 后改成
-          # @sha256:<digest>，避免插件升级悄悄改变元数据写入行为。
-          image: cnbcool/annotations:latest
-          settings:
-            type: ADD
-            fromJsonFile: .cnb/annotation.json
+    - *build_alpine
 
+main:
+  # 每天 00:05（Asia/Shanghai）执行，与手动按钮共用上面的 job 定义。
+  # 一次 buildx 构建产出 amd64/arm64 多架构 manifest list，两个单平台标签从同一份
+  # manifest 派生（不再三次构建，digest 天然一致）。
+  # 定时任务没有按钮输入，version 传不了（想钉版本只能手动触发），等价于留空：
+  # 基座用 Dockerfile 默认的 alpine:latest（每天跟上游），构建脚本把实际版本解析出来
+  # （如 3.25.1），直接推 <实际版本> 标签，冒烟通过后才把 latest / minor 提升到该
+  # digest；同名标签每天被覆盖，回查某天的产物要靠 annotation 里记录的 digest。
+  # 这些标签同时是 01:05 Chromium 流水线的基座，latest 提升失败时下游会自动
+  # 使用上一份基座，直到下一次冒烟通过。
+  'crontab: 5 0 * * *':
+    - *build_alpine

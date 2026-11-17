@@ -105,6 +105,16 @@ GitHub 与 GitLab 的 hosted runner 都在境外，直连官方源最快，这�
 - 安全报告走 [SECURITY.md](SECURITY.md)，贡献流程与硬性规则见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 - 文档入口：[docs/README.md](docs/README.md)。
 
+## 仓库
+
+| 平台    | 地址                             |
+|---------|----------------------------------|
+| CNB     | https://cnb.cool/dtapp/alpine    |
+| GitHub  | https://github.com/dtapps/alpine |
+| GitLab  | https://gitlab.com/dtapps/alpine |
+| Gitee   | https://gitee.com/dtapps/alpine  |
+| GitCode | https://gitcode.com/dtapp/alpine |
+
 ## 许可
 
 [MIT](LICENSE)

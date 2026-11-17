@@ -1,5 +1,36 @@
+# job 定义锚点：手动按钮与定时任务共用同一份 job，CNB 锚点只在单文件内有效，
+# 所以把定时任务的 crontab 事件也放到本文件（见下方 main），不要搬到 .cnb.yml。
+.build_chromium: &build_chromium
+  name: build-chromium
+  runner:
+    tags: cnb:arch:amd64 # 指定 Runner 必须有这个标签
+    # cpus: 64 # chromium 构建明显更吃资源，需要时在这里调
+  # CNB 的 docker 服务默认已支持多架构 buildx，无需 options.rootlessBuildkitd
+  services:
+    - docker # 启用 Docker 服务（用于 docker buildx/push）
+  # 远程 import 是可变引用：main 一改 CI 行为就变，PR 里看不到，也无法审计。
+  # TODO 收敛：把 docker.yml vendor 进 .cnb/envs/ 纳入评审，或至少钉到具体
+  # commit（https://cnb.cool/dtapp/envs/-/blob/<40 位 sha>/docker.yml）。
+  imports:
+    - https://cnb.cool/dtapp/envs/-/blob/main/docker.yml # 引入环境变量/配置
+    # 不要把 .cnb/scripts/build-chromium.sh 放进 imports（${...} 会被改写）
+  stages:
+    - name: 构建并推送多架构镜像
+      script: |
+        source .cnb/scripts/build-chromium.sh
+    # 元数据键全部带 chromium_ 前缀：同一个 commit 上还有 Alpine 基础镜像的
+    # image_* 键，不加前缀会互相覆盖（README 徽章会显示另一条流水线的值）。
+    - name: 写入镜像元数据
+      # cnbcool/annotations 目前只发 :latest，没有可固定的版本 tag，构建网络内也
+      # 取不到 digest（hub.docker.com 不可达）。TODO 待其发布版本化 tag 后改成
+      # @sha256:<digest>，避免插件升级悄悄改变元数据写入行为。
+      image: cnbcool/annotations:latest
+      settings:
+        type: ADD
+        fromJsonFile: .cnb/annotation.json
+
 '**':
-  # 自定义按钮可触发的事件：web_trigger_build_chromium
+  # 手动按钮：通过页面自定义按钮触发（web_trigger_build_chromium）。
   # 依赖 build-alpine.yml 的产物：Chromium 基于本仓库构建的 Alpine 基础镜像。
   # 定时任务排在 00:05 之后（01:05，间隔 1 小时）；手动触发时若同版本基座还不存在，构建会
   # 直接失败并提示先跑 build-alpine，不会退回官方 alpine。
@@ -10,33 +41,25 @@
   # manifest list 派生，冒烟与基座标签校验通过后才提升 latest / minor。
   # -cjk / -headless 不再发布；需要时用 WITH_CJK=1 / Dockerfile.headless 自行派生。
   web_trigger_build_chromium:
-    - name: build-chromium
-      runner:
-        tags: cnb:arch:amd64 # 指定 Runner 必须有这个标签
-        # chromium 多架构比 Alpine 基础镜像重得多，需要时在这里加 cpus / memory
-      # CNB 的 docker 服务默认已支持多架构 buildx，无需 options.rootlessBuildkitd
-      services:
-        - docker # 启用 Docker 服务（用于 docker buildx/push）
-      # 远程 import 是可变引用：main 一改 CI 行为就变，PR 里看不到，也无法审计。
-      # TODO 收敛：把 docker.yml vendor 进 .cnb/envs/ 纳入评审，或至少钉到具体
-      # commit（https://cnb.cool/dtapp/envs/-/blob/<40 位 sha>/docker.yml）。
-      imports:
-        - https://cnb.cool/dtapp/envs/-/blob/main/docker.yml # 引入环境变量/配置
-        # 不要把 .cnb/scripts/build-chromium.sh 放进 imports：imports 会对被引入的
-        # 文件做变量处理，脚本里的 ${...} 会被改写成带引号的字面量。脚本在仓库里，
-        # 由下面的 `source` 直接执行即可。
-      stages:
-        - name: 构建并推送多架构镜像
-          script: |
-            source .cnb/scripts/build-chromium.sh
-        # 元数据键全部带 chromium_ 前缀：同一个 commit 上还有 Alpine 基础镜像的
-        # image_* 键，不加前缀会互相覆盖（README 徽章会显示另一条流水线的值）。
-        - name: 写入镜像元数据
-          # cnbcool/annotations 目前只发 :latest，没有可固定的版本 tag，构建网络内也
-          # 取不到 digest（hub.docker.com 不可达）。TODO 待其发布版本化 tag 后改成
-          # @sha256:<digest>，避免插件升级悄悄改变元数据写入行为。
-          image: cnbcool/annotations:latest
-          settings:
-            type: ADD
-            fromJsonFile: .cnb/annotation.json
+    - *build_chromium
 
+main:
+  # 每天 01:05（Asia/Shanghai）执行，必须排在 00:05 的 Alpine 基础镜像之后，
+  # 与手动按钮共用上面的 job 定义。
+  # 中间留 1 小时给基座构建与 latest 提升：Chromium 的基座就是 Alpine 流水线
+  # 产出的 dtapp/alpine:latest。错峰同时避免 chromium 多架构构建与基座
+  # 构建抢 runner 和制品库带宽。
+  #
+  # 标签与基座同一套契约：<alpine 版本> / <major.minor> / latest 与
+  # <版本>-linux-{amd64,arm64}；版本号从基座容器里解析，不是入参。
+  # latest / minor 只在 dtapp/alpine 的同名标签已指向本次基座 digest 时提升，
+  # 所以 chromium 永远不会跑到基座前面。
+  #
+  # 定时任务没有按钮输入，所以两个输入都不传，等价于：
+  #   version=latest                 → 基座取 dtapp/alpine:latest（00:05 产出）
+  #   expected_chromium_major=空      → 不校验，跟随上游最新 Chromium 主版本
+  # 上游在分支内换 Chromium 主版本时构建正常跟随、不会失败；只有手动填了
+  # expected_chromium_major=<旧主版本> 做显式校验时，上游升级才会让构建红——
+  # 这时改填新版本号或 any 即可。
+  'crontab: 5 1 * * *':
+    - *build_chromium
