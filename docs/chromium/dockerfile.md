@@ -125,7 +125,7 @@ RUN echo "apk-index: ${APK_INDEX_DIGEST}" \
 
 自动带入、不再逐行声明的 9 个：`glib`、`pango`、`gdk-pixbuf`、`gtk+3.0`、`nss`、`freetype`、`harfbuzz`、`libstdc++`、`fontconfig`。**它们不是被删掉的依赖**，而是 `apk` 本来就会装：显式写出来不增体积，删掉也不减体积。
 
-另外，`ca-certificates` 与 `tzdata` 基座已经装过；这里仍显式列出，保证用默认官方基座独立构建时也成立，重复安装是幂等的。`curl`、`drill`、`netcat-openbsd` 不在本层安装，是从基座继承的。
+另外，`ca-certificates` 与 `tzdata` 基座已经装过；这里仍显式列出，保证用默认官方基座独立构建时也成立，重复安装是幂等的。`coreutils`、`curl`、`drill`、`git`、`jq`、`netcat-openbsd`、`wget` 不在本层安装，是从基座继承的。
 
 > `fontconfig` 在上面两个清单里各出现一次，不是笔误：它确实在闭包内，显式写出来是为了把「字体发现与匹配是必需能力」标进依赖声明，而不是默认它能一直被间接带入。
 

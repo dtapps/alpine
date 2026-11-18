@@ -102,7 +102,7 @@ RUN set -eux; \
     echo "apk-index: ${APK_INDEX_DIGEST}"; \
     sed -i 's@dl-cdn.alpinelinux.org@mirrors.cloud.tencent.com@g' /etc/apk/repositories; \
     apk add --no-cache \
-        ca-certificates curl drill git netcat-openbsd tzdata; \
+        ca-certificates coreutils curl drill git jq netcat-openbsd tzdata wget; \
     ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime; \
     echo "Asia/Shanghai" >/etc/timezone; \
     rm -rf /var/cache/apk/* /tmp/* /var/tmp/* /root/.cache
@@ -127,18 +127,21 @@ GitHub 侧去掉 `sed` 那一行，直接 `apk add`：GitHub runner 在境外，
 
 ## 包选择清单
 
-| 包                | 安装     | 净增     | 为什么需要                            |
-|-------------------|----------|----------|---------------------------------------|
-| `ca-certificates` | 0.20 MiB | 0.20 MiB | HTTPS 校验的基础，`curl` 与下游都依赖 |
-| `curl`            | 0.27 MiB | 5.06 MiB | 调 HTTP/HTTPS 接口、探活              |
-| `drill`           | 0.06 MiB | 0.40 MiB | DNS 排查，`dig` 的轻量替代            |
-| `git`             | 6.71 MiB | 7.63 MiB | 克隆代码、拉取依赖                    |
-| `netcat-openbsd`  | 0.04 MiB | 0.16 MiB | `nc -zv host port` 探端口             |
-| `tzdata`          | 0.43 MiB | 0.43 MiB | `Asia/Shanghai` 时区数据              |
+| 包                | 安装     | 净增     | 为什么需要                                                         |
+|-------------------|----------|----------|--------------------------------------------------------------------|
+| `ca-certificates` | 0.20 MiB | 0.20 MiB | HTTPS 校验的基础，`curl` 与下游都依赖                              |
+| `coreutils`       | 待实测   | 待实测   | `timeout`、`sort -V`、`mktemp` 等 busybox applet 不具备的 GNU 语义 |
+| `curl`            | 0.27 MiB | 5.06 MiB | 调 HTTP/HTTPS 接口、探活                                           |
+| `drill`           | 0.06 MiB | 0.40 MiB | DNS 排查，`dig` 的轻量替代                                         |
+| `git`             | 6.71 MiB | 7.63 MiB | 克隆代码、拉取依赖                                                 |
+| `jq`              | 待实测   | 待实测   | JSON 解析/格式化，`curl` 输出与接口响应直接可读                    |
+| `netcat-openbsd`  | 0.04 MiB | 0.16 MiB | `nc -zv host port` 探端口                                          |
+| `tzdata`          | 0.43 MiB | 0.43 MiB | `Asia/Shanghai` 时区数据                                           |
+| `wget`            | 待实测   | 待实测   | 单文件下载，不少脚本硬编码 `wget`                                  |
 
-单位 MiB；「安装」是该包自身的安装体积，「净增」是把它的依赖闭包一起装进来后镜像增加的量（数据来自 Alpine v3.24 官方 APKINDEX，取数 2026-10-31）。基线 `alpine:3.24.3` 自身安装约 8.02 MiB（压缩 3.53 MiB），六个包净增合计约 13.9 MiB。基座现在跟随上游，小版本升级后这些数字会有小幅变化，但不影响量级与取舍判断。
+单位 MiB；「安装」是该包自身的安装体积，「净增」是把它的依赖闭包一起装进来后镜像增加的量（数据来自 Alpine v3.24 官方 APKINDEX，取数 2026-10-31）。基线 `alpine:3.24.3` 自身安装约 8.02 MiB（压缩 3.53 MiB），六个老包净增合计约 13.9 MiB。`coreutils` / `jq` / `wget` 是后加的，体积尚未实测，补测后回填；知道确切数字前不要对外宣称增量。基座现在跟随上游，小版本升级后这些数字会有小幅变化，但不影响量级与取舍判断。
 
-六个包的选择标准是同一句话：**进容器就能定位问题、拉代码**。HTTP、端口、DNS 三条链路各有一个工具，再加 git、证书与时区，覆盖了绝大多数「服务连不上」「代码拉不下来」的排查路径。
+九个包的选择标准是同一句话：**进容器就能定位问题、拉代码、看懂接口返回**。HTTP、端口、DNS 三条链路各有一个工具，再加 git、证书、时区、GNU 基础工具、JSON 与 `wget`，覆盖了绝大多数「服务连不上」「代码拉不下来」「返回体看不清」的排查路径。
 
 注意「安装」和「净增」差得远的那一行：`curl` 自身只有 0.27 MiB，但它拖来了 `libcurl`、`nghttp2-libs`、`brotli-libs`、`zstd-libs`、`libidn2`、`libunistring` 一串依赖，实际代价 5.06 MiB。评估「要不要加某个包」时只看单包体积会严重低估，必须看闭包。
 
@@ -199,7 +202,7 @@ USER app
 
 - **改动的频率不对称**。这个 Dockerfile 一年改几次，改的内容基本都是包列表或源；「只想调时区、不动包列表」这种场景没有发生过。为几乎不存在的缓存收益付出四层的代价，方向就反了。
 - **多一层就多一次索引往返**。每层的 `apk` 调用都要为 `/etc/apk/repositories` 里的仓库取一次 `APKINDEX`。四层就是四轮；合成一层后只剩一轮。索引是纯网络往返，在 CI 上是实打实的秒级开销。
-- **装包本身很快**。六个包净增合计约 13.9 MiB，压缩后更小，全部装完只需要数秒。真正拖时间的是「下载索引」和「拉基础镜像」，不是解包这些包。留着一个专门装 `tzdata` 的层，省下的那点解包时间还不够它自己多一轮索引的开销。
+- **装包本身很快**。老六个包净增合计约 13.9 MiB，`coreutils` / `jq` / `wget` 未实测但都是小包，压缩后更小，全部装完只需要数秒。真正拖时间的是「下载索引」和「拉基础镜像」，不是解包这些包。留着一个专门装 `tzdata` 的层，省下的那点解包时间还不够它自己多一轮索引的开销。
 - **层数本身就是成本**。每层有独立的 metadata（层的 config、diff id、tar 头），层数越多，镜像清单越大、拉取时的请求数越多；对「一天被拉很多次」的基础镜像，这是复利成本。
 
 所以现在的取向是：**一次 `RUN` 把事做完**。代价是「改包列表会连带重建时区」，但时区那几条命令是纯本地操作，重跑没有网络开销，可以忽略。
@@ -246,12 +249,12 @@ docker image ls alpine:local
 
 ```bash
 docker build -f .cnb/docker/Dockerfile.alpine -t alpine:local .
-docker run --rm alpine:local sh -c 'cat /etc/apk/repositories; command -v curl nc drill git nslookup'
+docker run --rm alpine:local sh -c 'cat /etc/apk/repositories; command -v curl nc drill git jq wget nslookup'
 docker run --rm alpine:local sh -c 'cat /etc/timezone; readlink -f /etc/localtime; date +%Z'
 docker image inspect alpine:local --format '{{json .Config.Labels}}'
 ```
 
-倒数三条命令依次验证：源是 `main` + `community` 两行（CNB 主机是腾讯云，GitHub 是官方）、五个工具都在（注意是 `drill`，不是 `dig`）；时区三件套配套生效；`LABEL` 字段填对。
+倒数三条命令依次验证：源是 `main` + `community` 两行（CNB 主机是腾讯云，GitHub 是官方）、七个工具都在（注意是 `drill`，不是 `dig`）；时区三件套配套生效；`LABEL` 字段填对。
 
 Dockerfile 由 `dockerfmt` 格式化，改完跑 `make format-docker`；CI 不校验格式，但 diff 里的格式噪音会拖慢评审（见 [格式化](formatting.md)）。
 

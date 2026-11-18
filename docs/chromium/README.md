@@ -9,7 +9,7 @@
 ## 镜像里有什么
 
 - 基座：本仓库的 Alpine 基础镜像 `docker.cnb.cool/dtapp/alpine:<Alpine 版本>`（CI 按 `version` 选基座标签、读出实际版本后再取该版本标签的 digest 构建；`latest` 由每天 `00:05` 的基座构建产出）。Dockerfile 的默认基座是官方 `alpine:${ALPINE_VERSION}`，只用于不依赖私有仓库的本地构建
-- 继承自基座：`ca-certificates`、`curl`、`drill`、`git`、`netcat-openbsd`、`tzdata`；容器内可直接用 `curl` / `nc` / `drill` 探活、用 `git` 拉代码。仍不含 `bind-tools`（`dig`）、`vim`、`python` 与应用代码
+- 继承自基座：`ca-certificates`、`coreutils`、`curl`、`drill`、`git`、`jq`、`netcat-openbsd`、`tzdata`、`wget`；容器内可直接用 `curl` / `nc` / `drill` 探活、用 `git` 拉代码。仍不含 `bind-tools`（`dig`）、`vim`、`python` 与应用代码
 - APK 源：CNB 侧覆写为腾讯云的 `main` + `community`（`chromium` 在 community）；GitHub 侧沿用官方默认的 `main` + `community`，不换源
 - 浏览器主程序：`chromium`（Alpine 官方包，二进制位于 `/usr/bin/chromium`）
 - Chromium 运行所需图形/渲染依赖：`glib`、`pango`、`gdk-pixbuf`、`gtk+3.0`、`nss`、`freetype`、`harfbuzz`、`libstdc++`、`fontconfig` —— 这些由 `chromium` 的 `so:` 依赖**自动带入**，不需要显式声明；显式写出来不增体积、删掉也不减体积

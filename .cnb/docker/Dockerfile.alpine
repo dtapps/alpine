@@ -73,11 +73,14 @@ RUN set -eux; \
     sed -i 's@dl-cdn.alpinelinux.org@mirrors.cloud.tencent.com@g' /etc/apk/repositories; \
     apk add --no-cache \
         ca-certificates \
+        coreutils \
         curl \
         drill \
         git \
+        jq \
         netcat-openbsd \
-        tzdata; \
+        tzdata \
+        wget; \
     ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime; \
     echo "Asia/Shanghai" >/etc/timezone; \
     rm -rf /var/cache/apk/* /tmp/* /var/tmp/* /root/.cache
@@ -85,11 +88,16 @@ RUN set -eux; \
 # -------------------------------------------------------------------
 # 包选择说明（体积为 v3.24 x86_64 实测安装体积 / 含依赖净增）
 #   ca-certificates  0.20 MiB / 0.20  HTTPS 校验基础，curl 与下游都依赖
+#   coreutils        待实测           timeout、sort -V、mktemp 等 busybox applet 不具备的 GNU 行为
 #   curl             0.27 MiB / 5.06  含 libunistring、brotli、zstd、libcurl 等传递依赖
 #   drill            0.06 MiB / 0.40  DNS 排查（dig 的轻量替代，省 6.6 MiB）
 #   git              6.71 MiB / 7.63  克隆代码、拉取依赖（含 libexpat、pcre2）
+#   jq               待实测           JSON 解析/格式化（curl 输出、API 响应）
 #   netcat-openbsd   0.04 MiB / 0.16  端口探活 nc -zv（busybox 的 nc 不支持 -z）
 #   tzdata           0.43 MiB / 0.43  Asia/Shanghai 时区数据
+#   wget             待实测           单文件下载（不少脚本硬编码 wget，curl 之外的第二选择）
+#
+# coreutils / jq / wget 的体积尚未实测，补测后回填。
 #
 # 需要真正的 dig 语法与输出：把 drill 换成 bind-tools（多 6.6 MiB，闭包 17 个包）
 # 只需要「能不能解析」：删掉 drill，用 busybox 自带的 nslookup（再省 0.4 MiB）
@@ -109,7 +117,7 @@ LABEL org.opencontainers.image.source="${IMAGE_SOURCE}" \
     org.opencontainers.image.revision="${VCS_REF}" \
     org.opencontainers.image.created="${BUILD_DATE}" \
     org.opencontainers.image.version="${IMAGE_VERSION}" \
-    org.opencontainers.image.description="Alpine 基础镜像：ca-certificates + curl + drill + git + nc + Asia/Shanghai 时区" \
+    org.opencontainers.image.description="Alpine 基础镜像：ca-certificates + coreutils + curl + drill + git + jq + nc + wget + Asia/Shanghai 时区" \
     org.opencontainers.image.licenses="MIT" \
     org.opencontainers.image.base.name="alpine:${ALPINE_VERSION}" \
     org.opencontainers.image.base.digest="${BASE_DIGEST}"

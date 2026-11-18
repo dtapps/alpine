@@ -6,11 +6,11 @@
 
 ```bash
 docker build -f .cnb/docker/Dockerfile.alpine -t alpine:local .   # 默认 ALPINE_VERSION=latest
-docker run --rm alpine:local sh -c 'cat /etc/alpine-release; date; command -v curl drill git nc nslookup'
+docker run --rm alpine:local sh -c 'cat /etc/alpine-release; date; command -v curl drill git jq wget nc nslookup'
 ```
 
 - 构建上下文是仓库根目录（命令最后的 `.`），Dockerfile 在 `.cnb/docker/`，所以必须 `-f` 指定；`COPY` 之类的相对路径仍以根目录为基准。
-- 不传 `--build-arg` 时用的是 `ARG ALPINE_VERSION=latest` 的默认值，与 CI 定时任务完全一致：本地这一跑就等于「今天上游最新的 alpine + 六个包」，和 cron 当天的产物同源同内容。
+- 不传 `--build-arg` 时用的是 `ARG ALPINE_VERSION=latest` 的默认值，与 CI 定时任务完全一致：本地这一跑就等于「今天上游最新的 alpine + 九个包」，和 cron 当天的产物同源同内容。
 - 想复现某次具体产物，别改文件，传参即可：`--build-arg ALPINE_VERSION=3.25.1`（要位级一致就带 `@sha256:...`）。钉住之后 `FROM` 拉到的就是那一份，与上游当天发没发新补丁无关。
 - 这是最快的验证路径：宿主架构即产物架构，产物直接进本地 image store，可以立刻 `docker run`。
 

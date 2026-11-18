@@ -21,7 +21,7 @@ Alpine 镜像的完整文档在 [`index.md`](index.md)：快速上手、Dockerfi
 
 - 基础镜像：`alpine:latest`。基座刻意跟随上游最新稳定版，定时任务每天重建就自动带上新补丁甚至新小版本；具体是哪个版本由流水线解析后写进标签与元数据（如 `3.25.1`），所以「跟随最新」与「事后可追溯」可以同时成立（追溯靠元数据里的 digest，不靠标签留档）
 - APK 源：CNB 侧把基座源的主机名替换为腾讯云（保留 `main` + `community` 两行）；GitHub 侧不换源，沿用官方默认的 `main` + `community`
-- 预装工具：`ca-certificates`（HTTPS 校验）、`curl`（调接口）、`drill`（`dig` 的轻量替代，做 DNS 排查）、 `git`（克隆代码）、`netcat-openbsd`（`nc -zv host port` 探端口）、`tzdata`
+- 预装工具：`ca-certificates`（HTTPS 校验）、`coreutils`（GNU 版 `timeout`、`sort -V` 等 busybox 不具备的语义）、`curl`（调接口）、`drill`（`dig` 的轻量替代，做 DNS 排查）、`git`（克隆代码）、`jq`（JSON 解析/格式化）、`netcat-openbsd`（`nc -zv host port` 探端口）、`tzdata`、`wget`（单文件下载）
 - 时区与本地化：`ENV TZ=Asia/Shanghai`、`LANG`/`LC_ALL=C.UTF-8`，同时落盘 `/etc/localtime` 与 `/etc/timezone`。 只设 `TZ` 不够，musl 的时区解析仍依赖 `tzdata` 提供的 zoneinfo
 - 单层 `RUN` 完成「换源（仅 CNB）→ 装包 → 写时区 → 清缓存」：清理必须与安装同层，跨层 `rm` 只产生 whiteout， 旧层数据照样随镜像分发
 - 九个 OCI 标签：`source`、`url`（本镜像所在的 CNB 仓库）、`revision`、`created`、`version`、`description`、 `licenses`、`base.name`、`base.digest`。注意 `base.name` 按 OCI 规范指**基座镜像**（`alpine:latest`）， 本镜像自己的存放位置是 `source`/`url`，不是 Docker Hub

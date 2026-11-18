@@ -41,7 +41,7 @@ brew install shfmt yamlfmt markdownfmt dockerfmt shellcheck
 
 ```bash
 docker build -f .cnb/docker/Dockerfile.alpine -t alpine:local .   # 默认 ALPINE_VERSION=latest
-docker run --rm alpine:local sh -c 'cat /etc/alpine-release; command -v curl drill git nc nslookup; date +%Z'
+docker run --rm alpine:local sh -c 'cat /etc/alpine-release; command -v curl drill git jq wget nc nslookup; date +%Z'
 docker run --rm alpine:local sh -c 'wc -l </etc/apk/repositories; cat /etc/timezone'
 docker history alpine:local
 ```

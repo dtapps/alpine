@@ -1,6 +1,6 @@
 # 安全策略
 
-本仓库是一个自建镜像仓库，目前包含两个镜像：Alpine 基础镜像（`.cnb/docker/Dockerfile.alpine`，Alpine 官方源提供的 `ca-certificates`、`curl`、`drill`、`git`、`netcat-openbsd`、`tzdata`）与 Chromium 无头浏览器镜像（`.cnb/docker/Dockerfile.chromium`；`.cnb/docker/Dockerfile.headless` 只是本地/下游派生配方，CI 不发布）。Chromium 镜像 `FROM` 本仓库构建的 Alpine 基础镜像（CI 按 digest 钉住），因此同时继承基座的工具、时区与 APK 源配置；CNB 侧再覆写源以引入 `community` 里的 `chromium` 及其图形/渲染依赖，GitHub 侧沿用官方源（已含 `community`）；制品推送到子路径 `/chromium`。两者都没有业务代码，也没有自研二进制。
+本仓库是一个自建镜像仓库，目前包含两个镜像：Alpine 基础镜像（`.cnb/docker/Dockerfile.alpine`，Alpine 官方源提供的 `ca-certificates`、`coreutils`、`curl`、`drill`、`git`、`jq`、`netcat-openbsd`、`tzdata`、`wget`）与 Chromium 无头浏览器镜像（`.cnb/docker/Dockerfile.chromium`；`.cnb/docker/Dockerfile.headless` 只是本地/下游派生配方，CI 不发布）。Chromium 镜像 `FROM` 本仓库构建的 Alpine 基础镜像（CI 按 digest 钉住），因此同时继承基座的工具、时区与 APK 源配置；CNB 侧再覆写源以引入 `community` 里的 `chromium` 及其图形/渲染依赖，GitHub 侧沿用官方源（已含 `community`）；制品推送到子路径 `/chromium`。两者都没有业务代码，也没有自研二进制。
 
 下文的支持范围、标签与信任面以 **Alpine 基础镜像**为主；Chromium 镜像的攻击面、扫描口径与取舍见 [`docs/chromium/security-baseline.md`](docs/chromium/security-baseline.md)。
 
