@@ -172,7 +172,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 第 8 步之后还有两道门闸：冒烟测试通过后，才提升 `<major.minor>` 与 `latest`；提升前还要确认 `dtapp/alpine:<同名标签>` 已指向本次基座 digest，否则跳过——手动构建旧分支时，Chromium 的 `latest` 不会被拉回去。
 
-9. **元数据汇总**：`docker buildx imagetools inspect` 取 index digest；体积按平台算，单平台标签现在直接指向镜像清单，`--raw` 里就有 `layers`，求和即可（脚本保留了「退回 index 子 digest」的兜底路径）。Chromium 版本用 `docker run … chromium --version` 取，写进 `chromium_version`——标签只固定 Alpine 版本，同一个标签里的浏览器会漂，只有这个 key 能回答「这个 digest 里是哪个 Chromium」。基座信息同时写进 `chromium_base_image` / `chromium_base_digest`，可以反查这次构建叠在哪个基座上。结果写成 `.cnb/annotation-chromium.json`，由流水线第二步的 `cnbcool/annotations` 插件写进当前 commit 元数据，README 徽章从 `/-/badge/annotation/commit/latest/{key}` 读。细节见 [构建元数据](metadata-and-badges.md)。
+9. **元数据汇总**：`docker buildx imagetools inspect` 取 index digest；体积按平台算，单平台标签现在直接指向镜像清单，`--raw` 里就有 `layers`，求和即可（脚本保留了「退回 index 子 digest」的兜底路径）。Chromium 版本用 `docker run … chromium --version` 取，写进 `chromium_version`——标签只固定 Alpine 版本，同一个标签里的浏览器会漂，只有这个 key 能回答「这个 digest 里是哪个 Chromium」。再用一次 `docker run` 读产物容器的 `/lib/apk/db/installed`，按脚本里的关键包清单（浏览器本体、显式安装项与安全敏感的传递依赖）过滤后写成单行 `name=version` 的 `chromium_apk_versions`——依赖闭包有 180+ 个包，全量记录会把评论淹没。基座信息同时写进 `chromium_base_image` / `chromium_base_digest`，可以反查这次构建叠在哪个基座上。结果写成 `.cnb/annotation-chromium.json`，由流水线第二步的 `cnbcool/annotations` 插件写进当前 commit 元数据，README 徽章从 `/-/badge/annotation/commit/latest/{key}` 读。细节见 [构建元数据](metadata-and-badges.md)。
 
 ## 构建失败怎么定位
 

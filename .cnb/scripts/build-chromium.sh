@@ -45,6 +45,9 @@ BASE_WAIT_SECONDS=15
 # registry 缓存：每个镜像用自己的 <镜像>:buildcache，不和上游/下游共用
 CACHE_REF_SUFFIX="buildcache"
 CACHE_MODE="min"
+# 构建公告跟踪的关键包：浏览器本体 + 显式安装项 + 安全敏感的传递依赖。
+# 不记录全部 180+ 个包，避免评论被图形栈依赖的噪声淹没。
+KEY_PACKAGES="chromium ca-certificates font-freefont fontconfig tzdata tini openssl libssl3 libcrypto3 nss freetype harfbuzz libstdc++ zlib glib"
 
 # ---------- 输出助手 ----------
 info() { printf '  %s\n' "$*"; }
@@ -524,6 +527,20 @@ SIZE_AMD64="$(image_size_mb "${MANIFEST_REF}" amd64)"
 SIZE_ARM64="$(image_size_mb "${MANIFEST_REF}" arm64)"
 BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+# 关键软件包版本：写进元数据，构建公告用它做版本 diff。
+# 直接读 apk 数据库（/lib/apk/db/installed），P:/V: 两行就是包名与版本。
+CHROMIUM_APK_VERSIONS="$(docker run --rm --platform linux/amd64 "${IMAGE}:${STAMP}" \
+  awk -F: '
+    /^P:/ { p = substr($0, 3); v = ""; next }
+    /^V:/ { v = substr($0, 3); if (p != "" && v != "") print p "=" v; p = "" }
+  ' /lib/apk/db/installed 2>/dev/null \
+  | awk -v want="${KEY_PACKAGES}" '
+      BEGIN { n = split(want, a, " "); for (i = 1; i <= n; i++) keep[a[i]] = 1 }
+      { split($0, kv, "="); if (kv[1] in keep) print }
+    ' \
+  | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//' || true)"
+[ -n "${CHROMIUM_APK_VERSIONS}" ] || CHROMIUM_APK_VERSIONS="unknown"
+
 # 提示：本仓库同时发布 Alpine 基础镜像，它的元数据用 image_* 无前缀键，
 # 这里必须全部加 chromium_ 前缀，否则同一个 commit 上两组键互相覆盖。
 # 文件名也分开（annotation-chromium.json vs annotation.json）：CNB 的两个 job
@@ -540,6 +557,7 @@ cat >.cnb/annotation-chromium.json <<EOF
   "chromium_base_image": "${BASE_VERSION_REF}",
   "chromium_base_digest": "${BASE_DIGEST}",
   "chromium_apk_index_digest": "${APK_INDEX_DIGEST}",
+  "chromium_apk_versions": "${CHROMIUM_APK_VERSIONS}",
   "chromium_cache": "${CACHE}",
   "chromium_version": "${CHROMIUM_VERSION}",
   "chromium_built_at": "${BUILT_AT}",
@@ -553,6 +571,10 @@ printf '##[set-output chromium_image_digest=%s]\n' "${DIGEST}"
 info "digest    ${DIGEST}"
 info "size      amd64 ${SIZE_AMD64} / arm64 ${SIZE_ARM64}"
 info "chromium  ${CHROMIUM_VERSION}"
+case "${CHROMIUM_APK_VERSIONS}" in
+  unknown) info "软件包    读取失败（记为 unknown）" ;;
+  *) info "软件包    $(printf '%s' "${CHROMIUM_APK_VERSIONS}" | tr ' ' '\n' | awk 'NF { n++ } END { print n + 0 }') 个（关键包）" ;;
+esac
 info "元数据    .cnb/annotation-chromium.json"
 
 echo "=============================="

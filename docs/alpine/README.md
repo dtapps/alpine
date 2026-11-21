@@ -132,6 +132,7 @@ FROM docker.cnb.cool/dtapp/alpine:latest
 |----------------------|--------------------------------------------------|-------------------------------------------|
 | `image_version`      | 本次版本标签名，如 `3.25.1`                      | 解析出的 `ALPINE_REAL`                    |
 | `alpine_version`     | 解析出的基座实际版本，如 `3.25.1`                | 一次性容器里 `cat /etc/alpine-release`    |
+| `apk_versions`       | 已装软件包版本明细（单行 `name=version`）        | 产物容器里读 `/lib/apk/db/installed`      |
 | `base_image`         | 构建时用的基座引用，默认 `alpine:latest`         | `FROM` 用的那个值，`alpine:${ALPINE_REF}` |
 | `base_digest`        | 当时 `alpine:latest` 的 index digest             | `imagetools inspect alpine:${ALPINE_REF}` |
 | `image_digest`       | `sha256:...` 完整摘要（本次构建的 index）        | `docker buildx imagetools inspect`        |

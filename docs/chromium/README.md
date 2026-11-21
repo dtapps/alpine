@@ -171,6 +171,7 @@ USER chrome
 | `chromium_image_size_arm64`   | arm64 单平台压缩后体积（算法同上）               | 同上                                              |
 | `chromium_base_image`         | 本次构建的基座引用，如 `dtapp/alpine:3.24.3`     | 脚本解析出的基座版本标签                          |
 | `chromium_base_digest`        | 基座多架构 index 的完整摘要                      | `docker buildx imagetools inspect`                |
+| `chromium_apk_versions`       | 关键软件包版本明细（单行 `name=version`）        | 产物容器里读 `/lib/apk/db/installed`              |
 | `chromium_version`            | 镜像内实际 Chromium 版本，如 `155.0.8059.84`     | 在 `<版本>-linux-amd64` 里跑 `chromium --version` |
 | `chromium_built_at`           | UTC 构建时间                                     | `date -u`                                         |
 

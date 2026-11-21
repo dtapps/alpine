@@ -109,7 +109,7 @@ services:
 8.  imagetools create            派生 ${STAMP}-linux-amd64 / -linux-arm64，digest 与 index 条目相同
 9.  冒烟测试                     pull 后 amd64 起容器跑六项断言（含基座版本前缀、OCI 标签 version）
 10. 提升                         先 create -t ${MINOR}，再 create -t latest，都指向 ${STAMP}
-11. 元数据                       取 index digest 与各平台层体积，加两个时间戳与 base_digest，写 .cnb/annotation.json
+11. 元数据                       取 index digest 与各平台层体积，加两个时间戳与 base_digest，读 apk 数据库取 apk_versions，写 .cnb/annotation.json
 ```
 
 第 3 段是这套设计的关键：`latest` 只用于 `FROM`，**标签里永远不会出现 `latest`**，写进标签的是读出来的 `/etc/alpine-release`（如 `3.25.1`）。解析失败会直接 `exit 1`，不会带着「不知道是什么版本」的基座继续构建。
@@ -175,17 +175,18 @@ buildx 默认会给推送的 index 追加 attestation 清单：provenance（默�
 
 ## 插件职责
 
-| 插件镜像                           | 出现位置                   | 职责与关键参数                                                                 |
-|------------------------------------|----------------------------|--------------------------------------------------------------------------------|
-| `cnbcool/annotations:latest`       | `build-alpine.yml`         | `type: ADD` + `fromJsonFile: .cnb/annotation.json`，写 commit 元数据           |
-| `cnbcool/codewiki:latest`          | `codewiki.yml`             | 生成 Code Wiki，`git_doc_dir` 指定落盘目录，`timeout: 3h`                      |
-| `cnbcool/knowledge-base`           | `knowledge-base.yml`       | `include: '**/**.md'`、`issueSyncEnabled: true`、`ignoreProcessFailures: true` |
-| `cnbcool/sca-vulnerability:latest` | `sca.yml`                  | 组件漏洞扫描，`scanMode: full/diff`、`publish: true`、`failOnSeverity: high`   |
-| `cnbcool/sca-license:latest`       | `sca.yml`                  | License 扫描，参数同上                                                         |
-| `cnbcool/sca-sbom:latest`          | `sca.yml`                  | SBOM，`format: spdx`                                                           |
-| `cnbcool/code-review:latest`       | `code-review.yml`          | PR 上的 AI 评审，`comment`、`min_severity`、`exclude_categories`、`model` 等   |
-| `cnbcool/cnb-sechook`              | `cnb-sechook.yml`          | 汇总扫描结果与敏感信息统计，`max_display_authors: 5`                           |
-| `cnbcool/code-security-config`     | `code-security-config.yml` | `args: [validate]`，校验扫描配置本身合法                                       |
+| 插件镜像                           | 出现位置                   | 职责与关键参数                                                                        |
+|------------------------------------|----------------------------|---------------------------------------------------------------------------------------|
+| `cnbcool/annotations:latest`       | `build-alpine.yml`         | `type: ADD` + `fromJsonFile: .cnb/annotation.json`，写 commit 元数据                  |
+| `cnbcool/cnb-cli`                  | `build-alpine.yml`         | `sh .cnb/scripts/announce-build.sh alpine`：刷新构建记录 Issue，变化时评论 @CodeBuddy |
+| `cnbcool/codewiki:latest`          | `codewiki.yml`             | 生成 Code Wiki，`git_doc_dir` 指定落盘目录，`timeout: 3h`                             |
+| `cnbcool/knowledge-base`           | `knowledge-base.yml`       | `include: '**/**.md'`、`issueSyncEnabled: true`、`ignoreProcessFailures: true`        |
+| `cnbcool/sca-vulnerability:latest` | `sca.yml`                  | 组件漏洞扫描，`scanMode: full/diff`、`publish: true`、`failOnSeverity: high`          |
+| `cnbcool/sca-license:latest`       | `sca.yml`                  | License 扫描，参数同上                                                                |
+| `cnbcool/sca-sbom:latest`          | `sca.yml`                  | SBOM，`format: spdx`                                                                  |
+| `cnbcool/code-review:latest`       | `code-review.yml`          | PR 上的 AI 评审，`comment`、`min_severity`、`exclude_categories`、`model` 等          |
+| `cnbcool/cnb-sechook`              | `cnb-sechook.yml`          | 汇总扫描结果与敏感信息统计，`max_display_authors: 5`                                  |
+| `cnbcool/code-security-config`     | `code-security-config.yml` | `args: [validate]`，校验扫描配置本身合法                                              |
 
 插件镜像多数只有 `:latest`（`cnbcool/annotations` 目前没有版本化 tag，构建网络内也取不到它的 digest）， 所以插件升级不被本仓库控制。这是已知的供应链薄弱点，写在 [SECURITY](../../SECURITY.md) 的已知取舍里； 脚本侧的对策是「元数据 key 结构固定 + 冒烟核对 OCI 标签」，插件行为一变，下一次构建就能看出来。
 

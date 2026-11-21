@@ -65,17 +65,17 @@ main:
 
 `build-chromium.sh` 用一次多架构构建产出一个中性镜像，单平台标签不再重新构建。按脚本的执行顺序：
 
-| # | 步骤                | 做什么                                                                                                                                          |
-|---|---------------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
-| 1 | `version` 校验      | 去空白与不可打印字符，空值回落 `latest`，再用白名单校验是否为 Alpine 版本号，不合法直接 `exit 1`                                                |
-| 2 | 登录                | `docker login` 到 `${CNB_DOCKER_REGISTRY}`，凭证来自 `imports` 引入的组织环境                                                                   |
-| 3 | buildx 自检         | `docker buildx version` / `inspect`，并探测当前 buildx 是否支持 `--provenance`                                                                  |
-| 4 | 解析基座            | 选 `<仓库 slug>:latest` / `:3.24` / `:3.24.3` → 容器内读 `/etc/alpine-release` 得实际版本 → 取该版本标签的 index digest；任何一步失败都直接退出 |
-| 5 | 一次多架构构建      | `buildx build --platform linux/amd64,linux/arm64 --push`，推 `<alpine 版本>` 一个标签                                                           |
-| 6 | 单平台标签          | 从 manifest list 取每个架构的清单 digest，`imagetools create` 打 `<alpine 版本>-linux-<arch>`                                                   |
-| 7 | 冒烟 + 标签校验     | 跑 `chromium --version`、无头渲染 `about:blank`、时区断言，再校验 OCI `base.name` / `version` 两个标签                                          |
-| 8 | 提升 minor / latest | 仅当 `dtapp/alpine:<同名标签>` 已指向本次基座 digest 时提升；否则跳过并打日志                                                                   |
-| 9 | 汇总元数据          | digest / 两个平台的体积 / 基座信息 / `chromium_version` / `chromium_built_at` 写进 `.cnb/annotation-chromium.json`                              |
+| # | 步骤                | 做什么                                                                                                                                                    |
+|---|---------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1 | `version` 校验      | 去空白与不可打印字符，空值回落 `latest`，再用白名单校验是否为 Alpine 版本号，不合法直接 `exit 1`                                                          |
+| 2 | 登录                | `docker login` 到 `${CNB_DOCKER_REGISTRY}`，凭证来自 `imports` 引入的组织环境                                                                             |
+| 3 | buildx 自检         | `docker buildx version` / `inspect`，并探测当前 buildx 是否支持 `--provenance`                                                                            |
+| 4 | 解析基座            | 选 `<仓库 slug>:latest` / `:3.24` / `:3.24.3` → 容器内读 `/etc/alpine-release` 得实际版本 → 取该版本标签的 index digest；任何一步失败都直接退出           |
+| 5 | 一次多架构构建      | `buildx build --platform linux/amd64,linux/arm64 --push`，推 `<alpine 版本>` 一个标签                                                                     |
+| 6 | 单平台标签          | 从 manifest list 取每个架构的清单 digest，`imagetools create` 打 `<alpine 版本>-linux-<arch>`                                                             |
+| 7 | 冒烟 + 标签校验     | 跑 `chromium --version`、无头渲染 `about:blank`、时区断言，再校验 OCI `base.name` / `version` 两个标签                                                    |
+| 8 | 提升 minor / latest | 仅当 `dtapp/alpine:<同名标签>` 已指向本次基座 digest 时提升；否则跳过并打日志                                                                             |
+| 9 | 汇总元数据          | digest / 两个平台的体积 / 基座信息 / `chromium_version` / 关键包版本（`chromium_apk_versions`）/ `chromium_built_at` 写进 `.cnb/annotation-chromium.json` |
 
 每一步失败都显式退出：登录、基座解析、构建、单平台派生、冒烟、提升各自 `|| exit 1`，脚本不会留下「只有多架构、没有单平台」的半成品还继续写元数据。
 
@@ -207,6 +207,7 @@ services:
 | 插件镜像                           | 出现位置                   | 职责与关键参数                                                                                                 |
 |------------------------------------|----------------------------|----------------------------------------------------------------------------------------------------------------|
 | `cnbcool/annotations:latest`       | `build-chromium.yml`       | `type: ADD` + `fromJsonFile: .cnb/annotation-chromium.json`，写 commit 元数据（键带 `chromium_` 前缀）         |
+| `cnbcool/cnb-cli`                  | `build-chromium.yml`       | `sh .cnb/scripts/announce-build.sh chromium`：刷新构建记录 Issue，变化时评论 @CodeBuddy                        |
 | `cnbcool/codewiki:latest`          | `codewiki.yml`             | 生成 Code Wiki，`git_doc_dir` 指定落盘目录，`timeout: 3h`                                                      |
 | `cnbcool/knowledge-base`           | `knowledge-base.yml`       | `include: '**/**.md'`、`issueSyncEnabled: true`、`ignoreProcessFailures: true`                                 |
 | `cnbcool/sca-vulnerability:latest` | `sca.yml`                  | 组件漏洞扫描，`scanMode: full/diff`、`publish: true`；`failOnSeverity: high` 只在 `pull_request.target` 上启用 |

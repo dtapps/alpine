@@ -16,7 +16,7 @@
 | 元数据里 digest 是 `unknown`          | 取不到 manifest digest，或元数据步骤没跑                         | 手动 `imagetools inspect` 复核                   | [构建元数据](metadata-and-badges.md)   |
 | 构建日志出现「APK 索引解析失败」      | 一次性容器里 `apk update` 失败（网络或源不可达）                 | 本次自动降级为 `CACHE=off`，修好网络后重跑即可   | [缓存实现](../cache-implementation.md) |
 | 带缓存的构建在推送后失败              | registry 不接受 buildx 缓存清单                                  | 脚本会自动去掉缓存重试；反复出现就传 `CACHE=off` | [缓存实现](../cache-implementation.md) |
-| 徽章灰色或显示 `unknown`              | key 拼错、annotation 未写入、看错 commit                         | 对照十二个 key 与写入步骤                        | [构建元数据](metadata-and-badges.md)   |
+| 徽章灰色或显示 `unknown`              | key 拼错、annotation 未写入、看错 commit                         | 对照十三个 key 与写入步骤                        | [构建元数据](metadata-and-badges.md)   |
 | 体积显示 `unknown`                    | 取到的清单里没有 `layers` 字段（拿到的是 index）                 | 先按平台清单 digest 再取 `--raw`                 | [构建元数据](metadata-and-badges.md)   |
 | 单平台标签指向的清单与 index 条目不同 | 派生步骤没用 `imagetools create`（退回成重新构建）               | 核对 digest，重建走派生路径                      | [镜像与标签](images-and-tags.md)       |
 | 容器内时间是 UTC                      | 时区未生效，`/etc/localtime` 被覆盖或删了 tzdata                 | 检查时区文件与 `TZ` 变量                         | [Dockerfile 解析](dockerfile.md)       |

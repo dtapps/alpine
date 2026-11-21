@@ -130,7 +130,7 @@ Dockerfile 放在 `.cnb/docker/` 而不是根目录，是为了让 `.cnb/` 自�
 
 ## 产物与提交的映射
 
-- 每个成功构建把 `chromium_image_digest`、`chromium_image_digest_short`、`chromium_image_size`、`chromium_image_size_arm64`、`chromium_base_image`、`chromium_base_digest`、`chromium_apk_index_digest`、`chromium_cache`、`chromium_version`、`chromium_built_at` 写到**当前 commit** 的元数据上。
+- 每个成功构建把 `chromium_image_digest`、`chromium_image_digest_short`、`chromium_image_size`、`chromium_image_size_arm64`、`chromium_base_image`、`chromium_base_digest`、`chromium_apk_index_digest`、`chromium_apk_versions`、`chromium_cache`、`chromium_version`、`chromium_built_at` 写到**当前 commit** 的元数据上。
 - 因此「某个提交对应哪个镜像」可以反查：Commit 列表 → 元数据，或 `https://cnb.cool/dtapp/alpine/-/badge/annotation/commit/latest/{key}`。
 - 重跑同一提交会覆盖同名 key，只保留最后一次构建的结果；需要长期固定某个产物时，应按 digest 拉取。
 - 标签会移动（`latest` 每天 `01:05` 更新一次，取当天 `00:05` 产出的基座），digest 不会；这是下游选择「标签还是 digest」的根本区别。需要固定 Chromium 版本时更是只能按 digest——版本标签固定的是 Alpine 版本。

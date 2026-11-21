@@ -461,6 +461,17 @@ DIGEST_SHORT="$(printf '%s' "${INDEX_DIGEST#sha256:}" | cut -c1-12)"
 SIZE_AMD64="$(image_size_mb amd64)"
 SIZE_ARM64="$(image_size_mb arm64)"
 
+# 已装软件包版本（全部）：写进元数据，构建公告用它做版本 diff。
+# 直接读 apk 数据库（/lib/apk/db/installed）而不是 apk info：P:/V: 两行就是
+# 包名与版本，输出格式不随 apk-tools 版本变化。
+APK_VERSIONS="$(docker run --rm --platform linux/amd64 "${IMAGE}:${STAMP}" \
+  awk -F: '
+    /^P:/ { p = substr($0, 3); v = ""; next }
+    /^V:/ { v = substr($0, 3); if (p != "" && v != "") print p "=" v; p = "" }
+  ' /lib/apk/db/installed 2>/dev/null \
+  | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//' || true)"
+[ -n "${APK_VERSIONS}" ] || APK_VERSIONS="unknown"
+
 # 向 CNB Stage Result 输出变量（必须 source 才生效）
 # interior_version 保留旧名（=解析出来的 alpine 版本，兼容既有文档），image_version 是本产物
 printf '##[set-output interior_version=%s]\n' "${ALPINE_REAL}"
@@ -481,6 +492,7 @@ cat >.cnb/annotation.json <<EOF
   "image_size": "${SIZE_AMD64}",
   "image_size_arm64": "${SIZE_ARM64}",
   "apk_index_digest": "${APK_INDEX_DIGEST}",
+  "apk_versions": "${APK_VERSIONS}",
   "cache": "${CACHE}",
   "built_at": "${BUILT_AT}",
   "source_date": "${BUILD_DATE}"
@@ -489,6 +501,10 @@ EOF
 
 info "digest  ${INDEX_DIGEST:-unknown}"
 info "size    amd64 ${SIZE_AMD64} / arm64 ${SIZE_ARM64}"
+case "${APK_VERSIONS}" in
+  unknown) info "软件包  读取失败（记为 unknown）" ;;
+  *) info "软件包  $(printf '%s' "${APK_VERSIONS}" | tr ' ' '\n' | awk 'NF { n++ } END { print n + 0 }') 个" ;;
+esac
 info "元数据  .cnb/annotation.json"
 
 echo "=============================="

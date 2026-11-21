@@ -143,12 +143,12 @@ docker buildx imagetools inspect docker.cnb.cool/dtapp/alpine/chromium:latest --
 三个原因按概率排：
 
 1. annotation 步骤没执行。构建在某一步 `exit 1`，写入元数据的 `cnbcool/annotations` 阶段根本没跑。
-2. key 拼写不一致。可写入的 key 只有 `chromium_image_digest`、`chromium_image_digest_short`、`chromium_image_size`、`chromium_image_size_arm64`、`chromium_base_image`、`chromium_base_digest`、`chromium_version`、`chromium_built_at`。
+2. key 拼写不一致。可写入的 key 只有 `chromium_image_ref`、`chromium_image_version`、`chromium_image_digest`、`chromium_image_digest_short`、`chromium_image_size`、`chromium_image_size_arm64`、`chromium_base_image`、`chromium_base_digest`、`chromium_apk_index_digest`、`chromium_apk_versions`、`chromium_cache`、`chromium_version`、`chromium_built_at`、`revision`。
 3. 看的是另一条 commit。徽章里的 `latest` 指默认分支最近一次构建，不是「最近一次手动构建」。
 
 ```bash
 # 核对脚本真正写出的 key
-grep -n 'image_\|chromium_version\|chromium_built_at' .cnb/scripts/build-chromium.sh | tail -8
+grep -n '^[[:space:]]*"chromium_\|^[[:space:]]*"revision"' .cnb/scripts/build-chromium.sh
 ```
 
 `chromium_version` 是本期新增的：标签只固定 Alpine 版本，同一个标签里的 Chromium 会随上游补丁漂移，所以「这个 digest 里是哪个浏览器」只能看这个 key。`chromium_base_image` / `chromium_base_digest` 记录本次构建叠在哪个基座上，用来回答「这个 Chromium 镜像是从哪份 Alpine 基座出来的」。

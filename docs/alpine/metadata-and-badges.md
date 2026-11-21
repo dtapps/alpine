@@ -1,6 +1,6 @@
 # 构建元数据与徽章
 
-> 每次构建把版本名、两层 digest（本镜像与基座）、APK 索引指纹、两个平台的体积、两个时间戳写成当前 commit 的元数据，README 徽章从这批 key 取值；这里讲生成链路、十二个 key 的语义，以及 `unknown` 是怎么出现的。
+> 每次构建把版本名、两层 digest（本镜像与基座）、APK 索引指纹、已装软件包版本、两个平台的体积、两个时间戳写成当前 commit 的元数据，README 徽章从这批 key 取值；这里讲生成链路、十三个 key 的语义，以及 `unknown` 是怎么出现的。
 
 ## 链路
 
@@ -11,6 +11,7 @@ build-alpine.sh
   ├─ 构建 + 派生 + 冒烟 + 提升     产出 ${STAMP}（版本标签）、-linux-{amd64,arm64}、latest、${MINOR}
   ├─ docker buildx imagetools inspect  取 ${STAMP} 的 digest
   ├─ 逐平台取镜像清单 --raw        取 layers（+ config）体积
+  ├─ docker run … 读 apk 数据库     取已装软件包版本（apk_versions）
   └─ heredoc 写 .cnb/annotation.json
           │
           ▼
@@ -50,6 +51,7 @@ stages 第二步：image: cnbcool/annotations:latest
   "base_image": "alpine:latest",
   "base_digest": "sha256:...",
   "apk_index_digest": "9f2c…",
+  "apk_versions": "alpine-baselayout=3.7.0-r0 busybox=1.37.0-r19 curl=8.15.0-r0 …",
   "cache": "on",
   "image_size": "12.3MB",
   "image_size_arm64": "12.1MB",
@@ -67,11 +69,14 @@ stages 第二步：image: cnbcool/annotations:latest
 | `base_image`         | 构建时用的基座引用                    | `FROM` 用的那个值，`alpine:${ALPINE_REF}`，默认即 `alpine:latest`         |
 | `base_digest`        | 当时基座引用的 index digest           | `imagetools inspect alpine:${ALPINE_REF} --format '{{.Manifest.Digest}}'` |
 | `apk_index_digest`   | APK 仓库索引的 sha256，装包层的击穿点 | 一次性容器里 `apk update` 后对 `/var/cache/apk/APKINDEX.*` 求 `sha256`    |
+| `apk_versions`       | 已装软件包版本明细（`name=version`）  | 产物容器里读 `/lib/apk/db/installed` 的 `P:` / `V:` 行，空格分隔、单行    |
 | `cache`              | 本次是否使用 registry 缓存            | `on` / `off`；索引解析失败时脚本会自动降级成 `off`                        |
 | `image_size`         | amd64 单平台压缩体积                  | 该平台镜像清单里各 layer 之和加 config 的 `size`                          |
 | `image_size_arm64`   | arm64 单平台压缩体积                  | 同上                                                                      |
 | `built_at`           | 本次**实际构建时刻**（UTC）           | `date -u +%Y-%m-%dT%H:%M:%SZ`                                             |
 | `source_date`        | git 提交时间，进镜像的 `created` 标签 | `git log -1 --format=%cI`，取不到回落 `1970-01-01T00:00:00Z`              |
+
+`apk_versions` 是构建公告的 diff 依据：只记录 Alpine 版本号时，包升级了也说不清是哪个包；把已装包的 `name=version` 全量记下来，评论才能写成「curl 8.14.1-r0 → 8.15.0-r0」。用单行、空格分隔是为了满足 annotation 插件「value 不允许含换行」的限制，同时避免 JSON 转义。
 
 体积值是格式化后的人类可读串（`image_size_mb` 输出 `%.1fMB`），保留一位小数；`image_digest_short` 用 `cut -c1-12` 截断，因此只能用于人工核对，不能用于 `docker pull`。
 

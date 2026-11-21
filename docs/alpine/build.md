@@ -195,11 +195,11 @@ docker buildx build -t "${IMAGE}:${STAMP}" --platform linux/amd64,linux/arm64 \
 
 10. **提升可变标签**：顺序固定 `MINOR` 在前、`latest` 最后，两者都用 `imagetools create` 从 STAMP 提升。先 minor 后 latest 是为了让失败面只落在「新 minor 已更新、latest 还没动」这种可接受状态，而不是反过来。
 
-11. **元数据汇总**：用 `docker buildx imagetools inspect` 取 **STAMP** 的 index digest（不是 `latest`，避免读到别人刚提升的结果）；体积必须按平台算——对每个平台先定位到该平台的镜像清单，再对清单里 `layers` 之和加 `config.size` 求和，解析不出合理值时记 `-1`（最终显示 `unknown`，绝不输出假的小数字）。有 `jq` 时精确求和，没有则回落到 `grep` 扫全文档、靠 1 MiB 门闸兜底。
+11. **元数据汇总**：用 `docker buildx imagetools inspect` 取 **STAMP** 的 index digest（不是 `latest`，避免读到别人刚提升的结果）；体积必须按平台算——对每个平台先定位到该平台的镜像清单，再对清单里 `layers` 之和加 `config.size` 求和，解析不出合理值时记 `-1`（最终显示 `unknown`，绝不输出假的小数字）。有 `jq` 时精确求和，没有则回落到 `grep` 扫全文档、靠 1 MiB 门闸兜底。另外起一次容器读 `/lib/apk/db/installed`，把全部已装包的 `name=version` 收成单行 `apk_versions`，供构建公告做版本 diff。
 
 `##[set-output]` 也在这里输出：`interior_version=${ALPINE_REAL}`（解析出的具体版本，保留旧 key）、`image_version=${STAMP}`（本产物）。
 
-结果写成 `.cnb/annotation.json`（`image_digest`、`image_digest_short`、`image_version`、`alpine_version`、`base_image`、`base_digest`、`apk_index_digest`、`cache`、`image_size`、`image_size_arm64`、`built_at`、`source_date`），由流水线第二步的 `cnbcool/annotations` 插件（`type: ADD`、`fromJsonFile`）写进当前 commit 元数据，README 徽章从 `/-/badge/annotation/commit/latest/{key}` 读。`apk_index_digest` / `cache` 是排查「为什么这次没升级 / 为什么走了全量重建」的直接依据。
+结果写成 `.cnb/annotation.json`（`image_digest`、`image_digest_short`、`image_version`、`alpine_version`、`base_image`、`base_digest`、`apk_index_digest`、`apk_versions`、`cache`、`image_size`、`image_size_arm64`、`built_at`、`source_date`），由流水线第二步的 `cnbcool/annotations` 插件（`type: ADD`、`fromJsonFile`）写进当前 commit 元数据，README 徽章从 `/-/badge/annotation/commit/latest/{key}` 读。`apk_index_digest` / `cache` 是排查「为什么这次没升级 / 为什么走了全量重建」的直接依据；`apk_versions` 是构建公告判断「哪个包从哪个版本升到哪个版本」的依据。
 
 两个时间字段别混：`source_date` 是提交时间（`BUILD_DATE`，与镜像 `LABEL` 的 `created` 同值，为了让同一 commit 的两次构建 config 一致），`built_at` 是流水线实际运行的时刻（`BUILT_AT`）。标签不再带日期，**`built_at` 因此是唯一记录「什么时候构建的」的地方**，每次构建都要写，「这份产物是哪天做的」只能来元数据里查。细节见 [构建元数据](metadata-and-badges.md)。
 

@@ -4,16 +4,17 @@
 
 ## 目录与职责
 
-| 路径                            | 职责                                                                   |
-|---------------------------------|------------------------------------------------------------------------|
-| `.cnb.yml`                      | `include` 列表                                                         |
-| `.cnb/workflows/`               | 一个事件一组职责：构建、扫描、评审、文档生成、知识库                   |
-| `.cnb/docker/`                  | CNB 侧的 Dockerfile（alpine / chromium / headless）                    |
-| `.cnb/scripts/`                 | CNB 侧的构建脚本（解析版本、派生标签、冒烟、写元数据）                 |
-| `.cnb/web_trigger.yml`          | 手动按钮、权限、输入项                                                 |
-| `.cnb/annotation.json`          | Alpine 基础镜像的元数据（`.gitignore` 已排除），由 annotation 插件读取 |
-| `.cnb/annotation-chromium.json` | Chromium 镜像的元数据，同上                                            |
-| `.cnb/security/`                | 代码扫描配置                                                           |
+| 路径                             | 职责                                                                            |
+|----------------------------------|---------------------------------------------------------------------------------|
+| `.cnb.yml`                       | `include` 列表                                                                  |
+| `.cnb/workflows/`                | 一个事件一组职责：构建、扫描、评审、文档生成、知识库                            |
+| `.cnb/docker/`                   | CNB 侧的 Dockerfile（alpine / chromium / headless）                             |
+| `.cnb/scripts/`                  | CNB 侧的构建脚本（解析版本、派生标签、冒烟、写元数据）与构建公告脚本            |
+| `.cnb/scripts/announce-build.sh` | 构建记录 Issue：刷新正文、版本变化时评论并 @CodeBuddy，周一 / 1 号另发周/月总结 |
+| `.cnb/web_trigger.yml`           | 手动按钮、权限、输入项                                                          |
+| `.cnb/annotation.json`           | Alpine 基础镜像的元数据（`.gitignore` 已排除），由 annotation 插件读取          |
+| `.cnb/annotation-chromium.json`  | Chromium 镜像的元数据，同上                                                     |
+| `.cnb/security/`                 | 代码扫描配置                                                                    |
 
 GitHub 与 GitLab 侧各有一份对应的副本（`.github/`、`.gitlab/`），三边不互相引用，见文末「三份副本的同步」。
 
@@ -52,6 +53,8 @@ IMAGE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}/chromium" # Chromium �
 
 定时任务只在 `main` 顶层键下声明，所以只对默认分支生效；时间按 `Asia/Shanghai` 解释（cron 表达式里直接写北京时间）。定时任务与手动按钮写在同一份 `build-*.yml` 里，用单文件 YAML 锚点复用同一份 job 定义（CNB 的锚点不能跨 `include` 文件）。
 
+两条构建流水线的最后一个 stage 都调用 `.cnb/scripts/announce-build.sh`：在固定的 Issue 上刷新当前版本，版本号或软件包版本变化时追加评论并 @CodeBuddy，周一 / 每月 1 号另发周总结 / 月总结，由 NPC 整理成使用者可读的说明（见下方[构建记录 Issue](#构建记录-issue)）。
+
 ## 按钮、权限与输入
 
 `.cnb/web_trigger.yml` 定义手动入口，`event` 必须与 workflow 文件里的事件键逐字一致，否则按钮点下去不会产生流水线：
@@ -74,6 +77,22 @@ IMAGE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}/chromium" # Chromium �
 
 构建脚本把本次产物的 digest、版本、体积写到元数据文件，`cnbcool/annotations` 插件以 `type: ADD` + `fromJsonFile` 写进 commit annotation，README 徽章从 `/-/badge/annotation/commit/latest/{key}` 读取。Alpine 写 `.cnb/annotation.json`、Chromium 写 `.cnb/annotation-chromium.json`（文件名与 GitHub / GitLab 侧一致，两个镜像各写各的，互不覆盖）。键分两组：Alpine 用 `image_*`，Chromium 用 `chromium_*` 前缀，避免同一个 commit 上互相覆盖。
 
+软件包版本明细也在元数据里：Alpine 的 `apk_versions` 记录全部已装包，Chromium 的 `chromium_apk_versions` 只记录关键包（浏览器本体、显式安装项与安全敏感的传递依赖）。两者都是单行、空格分隔的 `name=version`，构建公告拿它做版本 diff；Chromium 的依赖闭包有 180+ 个包，全量记录会把评论淹没。
+
+## 构建记录 Issue
+
+每个镜像一条常驻 Issue（标题固定为 `[镜像] alpine 构建记录` / `[镜像] chromium 构建记录`），由构建流水线最后一个 stage 调用 `.cnb/scripts/announce-build.sh <alpine|chromium>` 维护：
+
+- 每次成功构建更新正文里的「当前版本」：镜像、版本号、摘要、体积与最近构建时间；
+- 版本号或软件包版本有变化时追加一条评论，评论开头 @CodeBuddy，让仓库里导入的 NPC 根据变更清单与 annotation 整理一份面向使用者的说明并作为评论发回；没有变化就不发，避免每天刷「无变化」；
+- 周一额外发一条周总结，每月 1 号额外发一条月总结（两者重合时合并成一条），总结「上一个星期 / 上一个月」的版本变化；基线是上一次同类总结评论顶部的 `<!-- build-summary-state:... -->` 标记，首次总结只记录当前版本建立基线，当天已发过则跳过，重跑幂等；
+- 总结与常规评论互不影响：版本没变的日子，周一 / 1 号照样发总结；
+- 上一次状态记在评论开头的 `<!-- build-announce-state:... -->` 标记里，重跑不会重复评论，也不需要额外的状态文件；
+- 首次运行会自动创建 Issue 与 `构建记录` 标签（标签已存在时忽略创建报错）；
+- stage 用 `cnbcool/cnb-cli` 镜像的 `cnb` 命令，依赖 CNB 注入的 `CNB_TOKEN` / `CNB_REPO_SLUG`；设了 `allowFailure: true`，公告失败不会把已经成功的镜像构建标红。
+
+为什么每个镜像一条而不是每天一条：两条常驻 Issue 就能装下全部历史（评论按时间倒序），Issue 列表不会每天多出两条；版本没变的日子不发常规评论，只在周一 / 每月 1 号发总结。
+
 ## 与 GitHub 侧的差异
 
 | 维度     | CNB                                                         | GitHub Actions                                                         |
@@ -95,15 +114,16 @@ IMAGE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}/chromium" # Chromium �
 
 ## 排错入口
 
-| 症状                               | 常见原因                                                                    | 先看哪里                                             |
-|------------------------------------|-----------------------------------------------------------------------------|------------------------------------------------------|
-| 点按钮没有任何流水线产生           | `web_trigger.yml` 的 `event` 与 workflow 事件键不一致，或文件没进 `include` | 按钮定义、`.cnb.yml` 的 `include`                    |
-| 脚本报 version 非法                | 输入不是 `latest` / `3.25` / `3.25.1`（Chromium 侧不接受 digest）           | 白名单校验的报错输出                                 |
-| `sed: can't read "${DOCKERFILE…}"` | 脚本被当成 import 处理，`${...}` 被改写                                     | `.cnb.yml` 的 `imports` 列表                         |
-| 冒烟失败、`latest` 没更新          | 基座版本前缀、时区、源行数、命令缺失、OCI 标签不符                          | 冒烟步骤的断言输出                                   |
-| Chromium 报「找不到基座」          | 基座标签不存在，或 `version` 指向尚未构建的版本                             | 先跑 Alpine 流水线，确认 `<repo>:<alpine 版本>` 存在 |
-| 徽章显示 `unknown`                 | 元数据解析失败（体积记 `-1`）或 digest 未取到                               | 日志里的「体积解析失败」行                           |
-| 定时任务不生效                     | 定时任务只在 `main` 顶层键下声明，或仓库 60 天无活动被平台停用              | `.cnb/workflows/build-*.yml`、平台设置               |
+| 症状                               | 常见原因                                                                              | 先看哪里                                             |
+|------------------------------------|---------------------------------------------------------------------------------------|------------------------------------------------------|
+| 点按钮没有任何流水线产生           | `web_trigger.yml` 的 `event` 与 workflow 事件键不一致，或文件没进 `include`           | 按钮定义、`.cnb.yml` 的 `include`                    |
+| 脚本报 version 非法                | 输入不是 `latest` / `3.25` / `3.25.1`（Chromium 侧不接受 digest）                     | 白名单校验的报错输出                                 |
+| `sed: can't read "${DOCKERFILE…}"` | 脚本被当成 import 处理，`${...}` 被改写                                               | `.cnb.yml` 的 `imports` 列表                         |
+| 冒烟失败、`latest` 没更新          | 基座版本前缀、时区、源行数、命令缺失、OCI 标签不符                                    | 冒烟步骤的断言输出                                   |
+| Chromium 报「找不到基座」          | 基座标签不存在，或 `version` 指向尚未构建的版本                                       | 先跑 Alpine 流水线，确认 `<repo>:<alpine 版本>` 存在 |
+| 徽章显示 `unknown`                 | 元数据解析失败（体积记 `-1`）或 digest 未取到                                         | 日志里的「体积解析失败」行                           |
+| 构建记录 Issue 没有新评论          | 常规评论要版本 / 软件包有变化；周/月总结只在周一 / 1 号发；或 `cnb` 命令无 Issue 权限 | 最后一个 stage 日志、`.cnb/settings.yml` 的 npc 导入 |
+| 定时任务不生效                     | 定时任务只在 `main` 顶层键下声明，或仓库 60 天无活动被平台停用                        | `.cnb/workflows/build-*.yml`、平台设置               |
 
 ## 相关文档
 
